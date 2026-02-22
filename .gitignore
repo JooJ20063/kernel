@@ -1,0 +1,17 @@
+*.o
+*.out
+*.bin
+
+build/
+
+*.iso
+iso/
+
+*.log
+*.map
+
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
