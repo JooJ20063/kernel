@@ -15,3 +15,5 @@ struct idt_ptr {
 } __attribute__((packed));
 
 void idt_init(void);
+void idt_install_isrs(void);
+void idt_install_irqs(void);
