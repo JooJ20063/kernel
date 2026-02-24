@@ -6,6 +6,8 @@ CFLAGS := -m32 -ffreestanding -Iinclude -Wall -Wextra -Werror
 ASFLAGS := --32
 LDFLAGS := -m elf_i386 -T linker.ld
 
+BUILD_DIR := build
+
 C_SRCS := \
 	kernel/kernel.c \
 	kernel/vga.c \
@@ -20,8 +22,8 @@ ASM_SRCS := \
 	boot/irq.s \
 	boot/idt_descriptor.s
 
-C_OBJS := $(C_SRCS:.c=.o)
-ASM_OBJS := $(ASM_SRCS:.s=.o)
+C_OBJS := $(addprefix $(BUILD_DIR)/,$(C_SRCS:.c=.o))
+ASM_OBJS := $(addprefix $(BUILD_DIR)/,$(ASM_SRCS:.s=.o))
 OBJS := $(C_OBJS) $(ASM_OBJS)
 
 ISO_DIR := iso
@@ -35,10 +37,12 @@ all: kernel.bin
 kernel.bin: $(OBJS)
 	$(LD) $(LDFLAGS) -o $@ $(OBJS)
 
-%.o: %.c
+$(BUILD_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-%.o: %.s
+$(BUILD_DIR)/%.o: %.s
+	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) $< -o $@
 
 iso: kernel.bin grub.cfg
@@ -51,5 +55,5 @@ run: iso
 	qemu-system-i386 -cdrom kernel.iso -boot d
 
 clean:
-	rm -f $(OBJS) kernel.bin kernel.iso
-	rm -rf $(ISO_DIR)
+	rm -f kernel.bin kernel.iso
+	rm -rf $(ISO_DIR) $(BUILD_DIR)

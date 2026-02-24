@@ -32,7 +32,8 @@ Kernel educacional em **C + Assembly (x86 32-bit)** para estudo de:
 │   └── vga.h             # interface da abstração VGA
 ├── kernel/
 │   ├── kernel.c          # kernel_main + handler de exceções
-│   └── vga.c             # abstração simples para VGA text mode
+│   └── vga.c             # abstração VGA (cor, scroll, cursor HW, decimal/hex)
+├── build/                # objetos .o gerados pelo Makefile
 ├── linker.ld             # script de link
 └── grub.cfg              # configuração GRUB
 ```
@@ -45,8 +46,8 @@ Kernel educacional em **C + Assembly (x86 32-bit)** para estudo de:
    - inicializa a IDT,
    - instala entradas de ISRs (0-31) e IRQs (32-47),
    - remapeia o PIC para `0x20-0x2F`,
-   - mascara tudo e habilita apenas IRQ0 (timer),
-   - habilita interrupções com `sti`.
+   - mascara tudo e habilita IRQ0 (timer) e IRQ1 (teclado),
+   - renderiza status inicial em VGA e habilita interrupções com `sti`.
 
 
 ## Observação importante sobre nome do binário
@@ -63,10 +64,16 @@ O `grub.cfg` deste projeto carrega **`/boot/kernel.bin`**. Portanto, no passo de
   - `qemu-system-i386`
 
 
+
+## IRQs implementadas
+
+- **IRQ0 (timer/PIT)**: atualiza contador de segundos na última linha (`TIMER: Ns`).
+- **IRQ1 (teclado/PS2)**: lê scancode de `0x60` e mostra última tecla na linha `KEY:`.
+
 ## Uso rápido com Makefile
 
 ```bash
-make            # gera kernel.bin
+make            # gera kernel.bin (objetos em build/)
 make iso        # gera kernel.iso com GRUB
 make run        # inicia no QEMU (boot via CD)
 make clean      # limpa artefatos
@@ -126,8 +133,8 @@ qemu-system-i386 -cdrom kernel.iso -boot d
 
 ## Próximos passos sugeridos
 
-- Evoluir a abstração VGA (scroll, cores e controle de cursor por hardware).
-- Adicionar driver de teclado (IRQ1) e timer (IRQ0) com contadores.
+- Adicionar suporte a teclado com Shift/CapsLock e layout ABNT2.
+- Melhorar o timer para frequência configurável e scheduler simples.
 - Evoluir tratamento de exceções (mensagens mais detalhadas por vetor).
 - Integrar CI com checagem de build freestanding.
 

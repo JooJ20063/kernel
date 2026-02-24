@@ -10,9 +10,8 @@ static const char* exc[] = {
 };
 
 void isr_handler_c(struct regs* r){
-    vga_set_cursor_pos(80);
-
-    vga_puts("EXCEPTION: ");
+    vga_set_color(0x0F, 0x04);
+    vga_write_at(80, "EXCEPTION: ");
 
     if (r->int_no < 32)
         vga_puts(exc[r->int_no]);
@@ -37,10 +36,14 @@ void kernel_main(void) {
    pic_remap(0x20, 0x28);
    pic_mask_all();
 
-   pic_unmask_irq(0);
+   pic_unmask_irq(0); /* timer */
+   pic_unmask_irq(1); /* keyboard */
 
+   vga_set_color(0x0F, 0x00);
    vga_clear();
    vga_write_at(0, "OK KERNEL !");
+   vga_write_at(80 * 23, "KEY: ");
+   vga_write_at(80 * 24, "TIMER: 0s");
 
    asm volatile ("sti");
 
