@@ -78,3 +78,10 @@ Há workflow em `.github/workflows/build.yml` rodando:
 
 - `grub.cfg` espera `/boot/kernel.bin`.
 - `make iso` depende de `grub-mkrescue` no host.
+
+
+## Documentação
+
+- [Arquitetura](docs/ARCHITECTURE.md)
+- [Shell](docs/SHELL.md)
+- [Guia de desenvolvimento](docs/DEVELOPMENT.md)
