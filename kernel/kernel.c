@@ -2,8 +2,6 @@
 #include <arch/x86/regs.h>
 #include <arch/x86/pic.h>
 
-extern void idt_init(void);
-
 static const char* exc[] = {
  "DIV0","DBG","NMI","BP","OF","BR","UD","NM","DF","CSO",
  "TS","NP","SS","GP","PF","RES","MF","AC","MC","XM",
@@ -51,15 +49,7 @@ void isr_handler_c(struct regs* r){
     for (;;);
 }
 
-void irq_handler_c(struct regs* r) {
-  if (r->int_no >= 32 && r->int_no <= 47) {
-      //IRQ recebida
-      pic_send_eoi(r->int_no -32);
-  }
-}
-
 void kernel_main(void) {
-   gdt_init();
    idt_init();
    idt_install_isrs();
    idt_install_irqs();
