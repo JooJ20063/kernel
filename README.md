@@ -53,6 +53,10 @@ Kernel educacional em **C + Assembly (x86 32-bit)** com:
 - `pmm`
 - `echo <texto>`
 - `panic`
+- `panic int3`
+- `panic ud2`
+- `panic div0`
+- `panic int <n>`
 
 ## Uso rápido
 

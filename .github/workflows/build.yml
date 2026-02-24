@@ -10,10 +10,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache APT packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: ${{ runner.os }}-apt-archives-${{ hashFiles('.github/workflows/build.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-archives-
+
       - name: Install toolchain
         run: |
+          sudo rm -f /etc/apt/apt.conf.d/docker-clean
           sudo apt-get update
-          sudo apt-get install -y gcc-multilib binutils
+          sudo apt-get install -y --no-install-recommends gcc-multilib binutils
 
       - name: Build kernel
         run: make

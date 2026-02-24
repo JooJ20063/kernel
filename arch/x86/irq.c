@@ -48,6 +48,8 @@ static void pit_set_frequency(uint32_t hz) {
 }
 
 static void print_irq_status(void) {
+    uint16_t cursor_before = vga_get_cursor_pos();
+
     vga_write_at(80 * 24, "TIMER: ");
     vga_putdec(timer_seconds);
     vga_puts("s HZ=");
@@ -57,6 +59,8 @@ static void print_irq_status(void) {
     vga_puts(" SW=");
     vga_putdec(sched_switch_count());
     vga_puts("   ");
+
+    vga_set_cursor_pos(cursor_before);
 }
 
 static char kbd_translate_abnt2(uint8_t scancode, uint8_t shift, uint8_t caps) {
