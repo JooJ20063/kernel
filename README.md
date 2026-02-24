@@ -7,7 +7,7 @@ Kernel educacional em **C + Assembly (x86 32-bit)** para estudo de:
 - remapeamento e controle do PIC 8259
 - saída de diagnóstico em VGA text mode
 
-> Status atual: projeto enxuto, sem sistema de build automatizado (`Makefile`) neste repositório.
+> Status atual: possui `Makefile` para build, geração de ISO e execução via QEMU.
 
 ## Estrutura do projeto
 
@@ -28,8 +28,11 @@ Kernel educacional em **C + Assembly (x86 32-bit)** para estudo de:
 │   ├── irq.h             # interface do handler de IRQ
 │   ├── pic.h             # interface do PIC
 │   └── regs.h            # layout de registradores empilhados
+├── include/kernel/
+│   └── vga.h             # interface da abstração VGA
 ├── kernel/
-│   └── kernel.c          # kernel_main + handler de exceções + saída VGA
+│   ├── kernel.c          # kernel_main + handler de exceções
+│   └── vga.c             # abstração simples para VGA text mode
 ├── linker.ld             # script de link
 └── grub.cfg              # configuração GRUB
 ```
@@ -59,22 +62,33 @@ O `grub.cfg` deste projeto carrega **`/boot/kernel.bin`**. Portanto, no passo de
   - `xorriso`
   - `qemu-system-i386`
 
+
+## Uso rápido com Makefile
+
+```bash
+make            # gera kernel.bin
+make iso        # gera kernel.iso com GRUB
+make run        # inicia no QEMU (boot via CD)
+make clean      # limpa artefatos
+```
+
 ## Build rápido (validação de compilação C)
 
 Este comando verifica os módulos C principais em modo freestanding:
 
 ```bash
 gcc -m32 -ffreestanding -Iinclude -Wall -Wextra -Werror -c \
-  kernel/kernel.c arch/x86/idt.c arch/x86/irq.c arch/x86/pic.c
+  kernel/kernel.c kernel/vga.c arch/x86/idt.c arch/x86/irq.c arch/x86/pic.c
 ```
 
 ## Build manual (referência)
 
-Como não há `Makefile`, abaixo está um fluxo manual de referência:
+Mesmo com `Makefile`, abaixo está um fluxo manual de referência:
 
 ```bash
 # 1) objetos .o (C + ASM)
 gcc -m32 -ffreestanding -Iinclude -c kernel/kernel.c -o kernel.o
+gcc -m32 -ffreestanding -Iinclude -c kernel/vga.c -o vga.o
 gcc -m32 -ffreestanding -Iinclude -c arch/x86/idt.c -o idt.o
 gcc -m32 -ffreestanding -Iinclude -c arch/x86/irq.c -o irq.o
 gcc -m32 -ffreestanding -Iinclude -c arch/x86/pic.c -o pic.o
@@ -87,13 +101,11 @@ as --32 boot/idt_descriptor.s -o idt_desc.o
 
 # 2) link do kernel ELF
 ld -m elf_i386 -T linker.ld -o kernel.bin \
-ld -m elf_i386 -T linker.ld -o kernel.elf \
-  boot.o gdt.o isr.o irq_stubs.o idt_desc.o kernel.o idt.o irq.o pic.o
+  boot.o gdt.o isr.o irq_stubs.o idt_desc.o kernel.o vga.o idt.o irq.o pic.o
 
 # 3) (opcional) gerar ISO com GRUB
 mkdir -p iso/boot/grub
 cp kernel.bin iso/boot/kernel.bin
-cp kernel.elf iso/boot/kernel.elf
 cp grub.cfg iso/boot/grub/grub.cfg
 grub-mkrescue -o kernel.iso iso
 
@@ -114,8 +126,7 @@ qemu-system-i386 -cdrom kernel.iso -boot d
 
 ## Próximos passos sugeridos
 
-- Adicionar `Makefile` (build, iso, run, clean).
-- Criar abstração simples de terminal VGA (newline, scroll, cores).
+- Evoluir a abstração VGA (scroll, cores e controle de cursor por hardware).
 - Adicionar driver de teclado (IRQ1) e timer (IRQ0) com contadores.
 - Evoluir tratamento de exceções (mensagens mais detalhadas por vetor).
 - Integrar CI com checagem de build freestanding.
