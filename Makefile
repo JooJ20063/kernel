@@ -11,6 +11,8 @@ BUILD_DIR := build
 C_SRCS := \
 	kernel/kernel.c \
 	kernel/vga.c \
+	kernel/pmm.c \
+	kernel/sched.c \
 	arch/x86/idt.c \
 	arch/x86/irq.c \
 	arch/x86/pic.c
@@ -30,7 +32,7 @@ ISO_DIR := iso
 ISO_BOOT := $(ISO_DIR)/boot
 ISO_GRUB := $(ISO_BOOT)/grub
 
-.PHONY: all iso run clean
+.PHONY: all iso run clean check
 
 all: kernel.bin
 
@@ -44,6 +46,10 @@ $(BUILD_DIR)/%.o: %.c
 $(BUILD_DIR)/%.o: %.s
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) $< -o $@
+
+check:
+	$(CC) $(CFLAGS) -c $(C_SRCS)
+	rm -f *.o
 
 iso: kernel.bin grub.cfg
 	mkdir -p $(ISO_GRUB)

@@ -29,10 +29,14 @@ Kernel educacional em **C + Assembly (x86 32-bit)** para estudo de:
 │   ├── pic.h             # interface do PIC
 │   └── regs.h            # layout de registradores empilhados
 ├── include/kernel/
-│   └── vga.h             # interface da abstração VGA
+│   ├── vga.h             # interface da abstração VGA
+│   ├── sched.h           # scheduler round-robin simples
+│   └── pmm.h             # gerenciador físico de páginas
 ├── kernel/
 │   ├── kernel.c          # kernel_main + handler de exceções
-│   └── vga.c             # abstração VGA (cor, scroll, cursor HW, decimal/hex)
+│   ├── vga.c             # abstração VGA (cor, scroll, cursor HW, decimal/hex)
+│   ├── sched.c           # scheduler por quantum em ticks
+│   └── pmm.c             # PMM bitmap de frames
 ├── build/                # objetos .o gerados pelo Makefile
 ├── linker.ld             # script de link
 └── grub.cfg              # configuração GRUB
@@ -67,8 +71,14 @@ O `grub.cfg` deste projeto carrega **`/boot/kernel.bin`**. Portanto, no passo de
 
 ## IRQs implementadas
 
-- **IRQ0 (timer/PIT)**: atualiza contador de segundos na última linha (`TIMER: Ns`).
-- **IRQ1 (teclado/PS2)**: lê scancode de `0x60` e mostra última tecla na linha `KEY:`.
+- **IRQ0 (timer/PIT)**: frequência configurável (atual em `irq_init(100, ...)`), atualiza status (`TIMER`, tarefa atual e trocas de contexto).
+- **IRQ1 (teclado/PS2)**: leitura de scancode set 1 com suporte a **Shift/CapsLock** e mapeamento base ABNT2.
+
+## PMM e scheduler
+
+- PMM inicializado para 64 MiB com bitmap de frames de 4 KiB.
+- API: `pmm_alloc_frame`, `pmm_free_frame`, `pmm_free_frame_count`.
+- Scheduler simples round-robin por quantum (configurado em ticks no `irq_init`).
 
 ## Uso rápido com Makefile
 
@@ -76,6 +86,7 @@ O `grub.cfg` deste projeto carrega **`/boot/kernel.bin`**. Portanto, no passo de
 make            # gera kernel.bin (objetos em build/)
 make iso        # gera kernel.iso com GRUB
 make run        # inicia no QEMU (boot via CD)
+make check      # valida compilação freestanding dos .c
 make clean      # limpa artefatos
 ```
 
@@ -85,7 +96,8 @@ Este comando verifica os módulos C principais em modo freestanding:
 
 ```bash
 gcc -m32 -ffreestanding -Iinclude -Wall -Wextra -Werror -c \
-  kernel/kernel.c kernel/vga.c arch/x86/idt.c arch/x86/irq.c arch/x86/pic.c
+  kernel/kernel.c kernel/vga.c kernel/sched.c kernel/pmm.c \
+  arch/x86/idt.c arch/x86/irq.c arch/x86/pic.c
 ```
 
 ## Build manual (referência)
@@ -96,6 +108,8 @@ Mesmo com `Makefile`, abaixo está um fluxo manual de referência:
 # 1) objetos .o (C + ASM)
 gcc -m32 -ffreestanding -Iinclude -c kernel/kernel.c -o kernel.o
 gcc -m32 -ffreestanding -Iinclude -c kernel/vga.c -o vga.o
+gcc -m32 -ffreestanding -Iinclude -c kernel/sched.c -o sched.o
+gcc -m32 -ffreestanding -Iinclude -c kernel/pmm.c -o pmm.o
 gcc -m32 -ffreestanding -Iinclude -c arch/x86/idt.c -o idt.o
 gcc -m32 -ffreestanding -Iinclude -c arch/x86/irq.c -o irq.o
 gcc -m32 -ffreestanding -Iinclude -c arch/x86/pic.c -o pic.o
@@ -108,7 +122,7 @@ as --32 boot/idt_descriptor.s -o idt_desc.o
 
 # 2) link do kernel ELF
 ld -m elf_i386 -T linker.ld -o kernel.bin \
-  boot.o gdt.o isr.o irq_stubs.o idt_desc.o kernel.o vga.o idt.o irq.o pic.o
+  boot.o gdt.o isr.o irq_stubs.o idt_desc.o kernel.o vga.o sched.o pmm.o idt.o irq.o pic.o
 
 # 3) (opcional) gerar ISO com GRUB
 mkdir -p iso/boot/grub
@@ -120,6 +134,12 @@ grub-mkrescue -o kernel.iso iso
 qemu-system-i386 -cdrom kernel.iso
 ```
 
+
+## CI
+
+Há workflow em `.github/workflows/build.yml` com:
+- build do kernel (`make`)
+- checagem freestanding (`make check`)
 
 ## Troubleshooting (QEMU)
 
@@ -133,10 +153,9 @@ qemu-system-i386 -cdrom kernel.iso -boot d
 
 ## Próximos passos sugeridos
 
-- Adicionar suporte a teclado com Shift/CapsLock e layout ABNT2.
-- Melhorar o timer para frequência configurável e scheduler simples.
-- Evoluir tratamento de exceções (mensagens mais detalhadas por vetor).
-- Integrar CI com checagem de build freestanding.
+- Expandir mapa ABNT2 com AltGr e teclas mortas.
+- Evoluir scheduler para tasks reais (context switch de registradores).
+- PMM com mapa de memória Multiboot2 em vez de limite fixo.
 
 ## Licença
 
