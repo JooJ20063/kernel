@@ -13,6 +13,9 @@ C_SRCS := \
 	kernel/vga.c \
 	kernel/pmm.c \
 	kernel/sched.c \
+	kernel/klog.c \
+	kernel/panic.c \
+	kernel/shell.c \
 	arch/x86/idt.c \
 	arch/x86/irq.c \
 	arch/x86/pic.c

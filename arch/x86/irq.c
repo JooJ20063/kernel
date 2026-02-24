@@ -2,6 +2,7 @@
 #include <arch/x86/pic.h>
 #include <kernel/vga.h>
 #include <kernel/sched.h>
+#include <kernel/shell.h>
 
 #define PIC1_DATA_PORT 0x21
 #define PIC2_DATA_PORT 0xA1
@@ -123,29 +124,19 @@ static void keyboard_irq(void) {
         return;
     }
 
-    vga_write_at(80 * 23, "KEY: ");
-
     if (scancode == 0x1C) {
-        vga_puts("ENTER            ");
+        shell_on_key('\n');
         return;
     }
 
     if (scancode == 0x0E) {
-        vga_puts("BACKSPACE        ");
+        shell_on_key('\b');
         return;
     }
 
     char c = kbd_translate_abnt2(scancode, kbd_shift, kbd_caps);
     if (c != 0) {
-        vga_puts("'");
-        vga_putc(c);
-        vga_puts("' SC=");
-        vga_puthex(scancode);
-        vga_puts("       ");
-    } else {
-        vga_puts("SC=");
-        vga_puthex(scancode);
-        vga_puts("             ");
+        shell_on_key(c);
     }
 }
 
@@ -160,6 +151,19 @@ void irq_init(uint32_t timer_hz, uint32_t scheduler_quantum_ticks) {
 
     (void)inb(PIC1_DATA_PORT);
     (void)inb(PIC2_DATA_PORT);
+}
+
+
+uint32_t irq_timer_ticks(void) {
+    return timer_ticks;
+}
+
+uint32_t irq_timer_seconds(void) {
+    return timer_seconds;
+}
+
+uint32_t irq_timer_hz(void) {
+    return timer_hz_cfg;
 }
 
 void irq_handler_c(registers_t *regs) {
