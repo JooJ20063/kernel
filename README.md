@@ -45,6 +45,11 @@ Kernel educacional em **C + Assembly (x86 32-bit)** para estudo de:
    - mascara tudo e habilita apenas IRQ0 (timer),
    - habilita interrupções com `sti`.
 
+
+## Observação importante sobre nome do binário
+
+O `grub.cfg` deste projeto carrega **`/boot/kernel.bin`**. Portanto, no passo de link/cópia para ISO, use esse nome (ou ajuste o `grub.cfg` para o nome que preferir).
+
 ## Pré-requisitos (desenvolvimento)
 
 - Linux com toolchain GCC que suporte `-m32`
@@ -81,17 +86,30 @@ as --32 boot/irq.s -o irq_stubs.o
 as --32 boot/idt_descriptor.s -o idt_desc.o
 
 # 2) link do kernel ELF
+ld -m elf_i386 -T linker.ld -o kernel.bin \
 ld -m elf_i386 -T linker.ld -o kernel.elf \
   boot.o gdt.o isr.o irq_stubs.o idt_desc.o kernel.o idt.o irq.o pic.o
 
 # 3) (opcional) gerar ISO com GRUB
 mkdir -p iso/boot/grub
+cp kernel.bin iso/boot/kernel.bin
 cp kernel.elf iso/boot/kernel.elf
 cp grub.cfg iso/boot/grub/grub.cfg
 grub-mkrescue -o kernel.iso iso
 
 # 4) (opcional) executar
 qemu-system-i386 -cdrom kernel.iso
+```
+
+
+## Troubleshooting (QEMU)
+
+- **`/boot/kernel.bin not found`**: verifique se você copiou `kernel.bin` para `iso/boot/kernel.bin` antes do `grub-mkrescue`.
+- **Tela mostra `OK KERNEL !` e reinicia voltando ao BIOS/iPXE**: isso indica reset/triple fault após o kernel iniciar (não é erro de ISO). Garanta que os stubs de IRQ retornem com `iret` sem habilitar interrupções manualmente no meio do retorno.
+- Para boot direto da ISO, prefira:
+
+```bash
+qemu-system-i386 -cdrom kernel.iso -boot d
 ```
 
 ## Próximos passos sugeridos
