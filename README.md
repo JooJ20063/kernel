@@ -87,11 +87,13 @@ as --32 boot/idt_descriptor.s -o idt_desc.o
 
 # 2) link do kernel ELF
 ld -m elf_i386 -T linker.ld -o kernel.bin \
+ld -m elf_i386 -T linker.ld -o kernel.elf \
   boot.o gdt.o isr.o irq_stubs.o idt_desc.o kernel.o idt.o irq.o pic.o
 
 # 3) (opcional) gerar ISO com GRUB
 mkdir -p iso/boot/grub
 cp kernel.bin iso/boot/kernel.bin
+cp kernel.elf iso/boot/kernel.elf
 cp grub.cfg iso/boot/grub/grub.cfg
 grub-mkrescue -o kernel.iso iso
 
