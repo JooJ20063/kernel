@@ -63,13 +63,35 @@ void kernel_main(uint32_t mb_info_addr) {
 
    vmm_init();
 
+    kernel_panic(reason, r);
+}
+
+void kernel_main(void) {
+   vga_set_color(0x0F, 0x00);
+   vga_clear();
+
+   klog_info("booting kernel");
+
+   idt_init();
+   idt_install_isrs();
+   idt_install_irqs();
+
+   pic_remap(0x20, 0x28);
+   pic_mask_all();
+
+   pic_unmask_irq(0); /* timer */
+   pic_unmask_irq(1); /* keyboard */
+
+   irq_init(100, 25);
+
+   pmm_init(64U * 1024U * 1024U);
+   uint32_t frame = pmm_alloc_frame();
+
    klog_info("interrupts configured");
    vga_puts("PMM free frames=");
    vga_putdec(pmm_free_frame_count());
    vga_puts(" alloc=");
    vga_puthex(frame);
-   vga_puts(" VMM=");
-   vga_puts(vmm_is_enabled() ? "ON" : "OFF");
    vga_puts("\n");
 
    asm volatile ("sti");
