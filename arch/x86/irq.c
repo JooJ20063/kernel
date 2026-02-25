@@ -9,6 +9,7 @@
 #define PIT_CMD_PORT 0x43
 #define PIT_CH0_PORT 0x40
 #define KBD_DATA_PORT 0x60
+#define KBD_STATUS_PORT 0x64
 #define PIT_BASE_HZ 1193182U
 
 static uint32_t timer_hz_cfg = 100;
@@ -63,6 +64,11 @@ static void print_irq_status(void) {
     vga_set_cursor_pos(cursor_before);
 }
 
+
+static uint8_t ps2_has_output(void) {
+    return (uint8_t)(inb(KBD_STATUS_PORT) & 0x01U);
+}
+
 static char kbd_translate_abnt2(uint8_t scancode, uint8_t shift, uint8_t caps) {
     static const char normal[128] = {
         [0x02]='1',[0x03]='2',[0x04]='3',[0x05]='4',[0x06]='5',[0x07]='6',
@@ -110,7 +116,13 @@ static void timer_irq(void) {
 }
 
 static void keyboard_irq(void) {
-    uint8_t scancode = inb(KBD_DATA_PORT);
+    uint8_t scancode;
+
+    if (!ps2_has_output()) {
+        return;
+    }
+
+    scancode = inb(KBD_DATA_PORT);
 
     if (scancode == 0x2A || scancode == 0x36) {
         kbd_shift = 1;
