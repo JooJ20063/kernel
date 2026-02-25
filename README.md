@@ -4,8 +4,7 @@ Kernel educacional em **C + Assembly (x86 32-bit)** com:
 - IDT/ISRs/IRQs
 - PIC + PIT
 - teclado PS/2 (ABNT2 base, Shift/CapsLock)
-- PMM (bitmap de frames via Multiboot2 memory map)
-- VMM (paginação com mapeamento identidade inicial)
+- PMM (bitmap de frames)
 - scheduler round-robin simples
 - VGA text mode + logging + shell primitivo
 
@@ -58,7 +57,6 @@ Kernel educacional em **C + Assembly (x86 32-bit)** com:
 - `panic int3`
 - `panic ud2`
 - `panic div0`
-- `panic null`
 - `panic int <n>`
 
 ## Uso rápido
