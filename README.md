@@ -85,4 +85,3 @@ Há workflow em `.github/workflows/build.yml` rodando:
 - [Arquitetura](docs/ARCHITECTURE.md)
 - [Shell](docs/SHELL.md)
 - [Guia de desenvolvimento](docs/DEVELOPMENT.md)
-- [Proteção de memória (plano)](docs/MEMORY_PROTECTION.md)
