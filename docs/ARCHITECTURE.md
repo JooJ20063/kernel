@@ -62,4 +62,4 @@ Este documento descreve os componentes atuais do kernel e como eles interagem.
 
 1. Bootloader entrega ponteiro de info do Multiboot2 para `kernel_main`.
 2. PMM lê o memory map e marca regiões reservadas (baixo 1MiB, kernel e estrutura Multiboot).
-3. VMM configura page directory/tables iniciais e habilita bit PG no `cr0`.
+3. VMM configura page directory/tables iniciais, não mapeia `0x0` e habilita bits `PG` + `WP` no `cr0`.

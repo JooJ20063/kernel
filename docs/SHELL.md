@@ -15,6 +15,7 @@ Fornecer uma interface mínima para inspeção/debug em runtime.
 - `panic int3`: dispara breakpoint exception.
 - `panic ud2`: dispara invalid opcode.
 - `panic div0`: dispara divisão por zero.
+- `panic null`: tenta escrita em ponteiro nulo (esperado `#PF`).
 - `panic int <n>`: panic manual com metadata de interrupção.
 
 ## Limitações atuais

@@ -86,6 +86,12 @@ static void shell_cmd_panic(const char *arg) {
         return;
     }
 
+    if (str_eq(arg, "null")) {
+        volatile uint32_t *pnull = (volatile uint32_t *)0x0;
+        *pnull = 0xDEADBEEFU;
+        return;
+    }
+
     if (str_starts(arg, "int ")) {
         int ok;
         uint32_t int_no = parse_u32(arg + 4, &ok);
@@ -98,13 +104,13 @@ static void shell_cmd_panic(const char *arg) {
         }
     }
 
-    klog_warn("panic usage: panic [int3|ud2|div0|int <n>]");
+    klog_warn("panic usage: panic [int3|ud2|div0|null|int <n>]");
 }
 
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
         vga_puts("cmds: help clear ticks task pmm echo panic\n");
-        vga_puts("panic modes: panic int3 | panic ud2 | panic div0 | panic int <n>\n");
+        vga_puts("panic modes: panic int3 | panic ud2 | panic div0 | panic null | panic int <n>\n");
     } else if (str_eq(cmd, "clear")) {
         vga_clear();
     } else if (str_eq(cmd, "ticks")) {
