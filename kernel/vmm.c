@@ -11,10 +11,18 @@ static uint32_t page_directory[1024] __attribute__((aligned(4096)));
 static uint32_t page_tables[VMM_TABLE_COUNT][1024] __attribute__((aligned(4096)));
 static uint8_t vmm_enabled;
 
+static void vmm_invlpg(uintptr_t addr) {
+    asm volatile ("invlpg (%0)" : : "r"(addr) : "memory");
+}
+
 int vmm_map_page(uintptr_t virt_addr, uintptr_t phys_addr, uint32_t flags) {
     uint32_t dir_idx = (uint32_t)(virt_addr >> 22);
     uint32_t table_idx = (uint32_t)((virt_addr >> 12) & 0x3FFU);
     uint32_t page_flags = VMM_PAGE_PRESENT | (flags & (VMM_PAGE_RW));
+
+    if ((virt_addr & (PAGE_SIZE - 1U)) != 0 || (phys_addr & (PAGE_SIZE - 1U)) != 0) {
+        return -2;
+    }
 
     if (dir_idx >= VMM_TABLE_COUNT) {
         return -1;
@@ -23,6 +31,10 @@ int vmm_map_page(uintptr_t virt_addr, uintptr_t phys_addr, uint32_t flags) {
     page_directory[dir_idx] = ((uint32_t)(uintptr_t)page_tables[dir_idx] & 0xFFFFF000U) |
                               VMM_PAGE_PRESENT | VMM_PAGE_RW;
     page_tables[dir_idx][table_idx] = ((uint32_t)phys_addr & 0xFFFFF000U) | page_flags;
+
+    if (vmm_enabled) {
+        vmm_invlpg(virt_addr);
+    }
 
     return 0;
 }
@@ -65,4 +77,11 @@ void vmm_init(void) {
 
 uint8_t vmm_is_enabled(void) {
     return vmm_enabled;
+}
+
+uint8_t vmm_wp_is_enabled(void) {
+    uint32_t cr0;
+
+    asm volatile ("mov %%cr0, %0" : "=r"(cr0));
+    return (uint8_t)((cr0 & CR0_WP) != 0U);
 }

@@ -7,4 +7,5 @@
 
 void vmm_init(void);
 uint8_t vmm_is_enabled(void);
+uint8_t vmm_wp_is_enabled(void);
 int vmm_map_page(uintptr_t virt_addr, uintptr_t phys_addr, uint32_t flags);

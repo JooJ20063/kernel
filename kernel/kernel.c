@@ -4,6 +4,7 @@
 #include <kernel/vga.h>
 #include <kernel/pmm.h>
 #include <kernel/vmm.h>
+#include <kernel/kmalloc.h>
 #include <kernel/panic.h>
 #include <kernel/klog.h>
 #include <kernel/shell.h>
@@ -15,6 +16,10 @@ struct exception_info {
 
 extern uint8_t _kernel_start;
 extern uint8_t _kernel_end;
+extern uint8_t _text_start;
+extern uint8_t _text_end;
+extern uint8_t _rodata_start;
+extern uint8_t _rodata_end;
 
 static const struct exception_info exc[] = {
     {"#DE", "Divide Error"}, {"#DB", "Debug"}, {"NMI", "Non-maskable interrupt"},
@@ -29,6 +34,29 @@ static const struct exception_info exc[] = {
     {"28", "Hypervisor injection"}, {"29", "VMM communication"}, {"30", "Security exception"},
     {"31", "Reserved"}
 };
+
+static int map_range_flags(uintptr_t start, uintptr_t end, uint32_t flags) {
+    uintptr_t page_start = start & ~(uintptr_t)0xFFFU;
+    uintptr_t page_end = (end + 0xFFFU) & ~(uintptr_t)0xFFFU;
+
+    for (uintptr_t addr = page_start; addr < page_end; addr += 0x1000U) {
+        if (vmm_map_page(addr, addr, flags) != 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static void protect_kernel_ro_sections(void) {
+    if (map_range_flags((uintptr_t)&_text_start, (uintptr_t)&_text_end, 0) != 0) {
+        kernel_panic("failed to protect .text", 0);
+    }
+
+    if (map_range_flags((uintptr_t)&_rodata_start, (uintptr_t)&_rodata_end, 0) != 0) {
+        kernel_panic("failed to protect .rodata", 0);
+    }
+}
 
 void isr_handler_c(registers_t *r){
     const char *reason = "Unhandled exception";
@@ -59,18 +87,18 @@ void kernel_main(uint32_t mb_info_addr) {
    irq_init(100, 25);
 
    pmm_init_from_multiboot(mb_info_addr, (uintptr_t)&_kernel_start, (uintptr_t)&_kernel_end);
-   uint32_t frame = pmm_alloc_frame();
-
    vmm_init();
+   protect_kernel_ro_sections();
+   kmalloc_init();
 
    klog_info("interrupts configured");
    vga_puts("PMM free frames=");
    vga_putdec(pmm_free_frame_count());
-   vga_puts(" alloc=");
-   vga_puthex(frame);
    vga_puts(" VMM=");
    vga_puts(vmm_is_enabled() ? "ON" : "OFF");
-   vga_puts("\n");
+   vga_puts(" WP=");
+   vga_puts(vmm_wp_is_enabled() ? "ON" : "OFF");
+   vga_puts(" null-guard=ON\n");
 
    asm volatile ("sti");
 
