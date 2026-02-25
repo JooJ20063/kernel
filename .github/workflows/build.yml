@@ -1,0 +1,44 @@
+name: freestanding-build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache APT packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: ${{ runner.os }}-apt-archives-${{ hashFiles('.github/workflows/build.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-archives-
+
+      - name: Install toolchain
+        run: |
+          sudo rm -f /etc/apt/apt.conf.d/docker-clean
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-multilib binutils
+
+      - name: Sanity checks (kernel entry + multiboot2 symbols)
+        run: |
+          test "$(rg -n '^void kernel_main\(' kernel/kernel.c | wc -l)" -eq 1
+          rg -n '^#define MULTIBOOT2_TAG_END ' include/kernel/multiboot2.h
+          rg -n '^#define MULTIBOOT2_TAG_MMAP ' include/kernel/multiboot2.h
+          rg -n '^#define MULTIBOOT2_MMAP_AVAILABLE ' include/kernel/multiboot2.h
+          rg -n 'struct multiboot2_tag\b' include/kernel/multiboot2.h
+          rg -n 'struct multiboot2_tag_mmap\b' include/kernel/multiboot2.h
+          rg -n 'struct multiboot2_mmap_entry\b' include/kernel/multiboot2.h
+          rg -n '^#include <kernel/multiboot2.h>' kernel/pmm.c
+
+      - name: Build kernel
+        run: |
+          make clean
+          make
+
+      - name: Freestanding check
+        run: make check

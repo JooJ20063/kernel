@@ -1,65 +1,51 @@
 #include <arch/x86/idt.h>
-#include <arch/x86/regs.h>
 #include <arch/x86/pic.h>
+#include <arch/x86/irq.h>
+#include <kernel/vga.h>
+#include <kernel/pmm.h>
+#include <kernel/vmm.h>
+#include <kernel/panic.h>
+#include <kernel/klog.h>
+#include <kernel/shell.h>
 
-extern void idt_init(void);
-
-static const char* exc[] = {
- "DIV0","DBG","NMI","BP","OF","BR","UD","NM","DF","CSO",
- "TS","NP","SS","GP","PF","RES","MF","AC","MC","XM",
- "VE","CP","22","23","24","25","26","27","28","29","30","31"
+struct exception_info {
+    const char *name;
+    const char *detail;
 };
 
-static volatile char* vga = (volatile char*)0xB8000;
-static int cursor = 0;
+extern uint8_t _kernel_start;
+extern uint8_t _kernel_end;
 
-static void vga_putc(char c){
-    vga[cursor++] = c;
-    vga[cursor++] = 0x0F;
+static const struct exception_info exc[] = {
+    {"#DE", "Divide Error"}, {"#DB", "Debug"}, {"NMI", "Non-maskable interrupt"},
+    {"#BP", "Breakpoint"}, {"#OF", "Overflow"}, {"#BR", "BOUND range exceeded"},
+    {"#UD", "Invalid opcode"}, {"#NM", "Device not available"}, {"#DF", "Double fault"},
+    {"CSO", "Coprocessor segment overrun"}, {"#TS", "Invalid TSS"}, {"#NP", "Segment not present"},
+    {"#SS", "Stack-segment fault"}, {"#GP", "General protection fault"}, {"#PF", "Page fault"},
+    {"RES", "Reserved"}, {"#MF", "x87 floating-point"}, {"#AC", "Alignment check"},
+    {"#MC", "Machine check"}, {"#XM", "SIMD floating-point"}, {"#VE", "Virtualization"},
+    {"#CP", "Control protection"}, {"22", "Reserved"}, {"23", "Reserved"},
+    {"24", "Reserved"}, {"25", "Reserved"}, {"26", "Reserved"}, {"27", "Reserved"},
+    {"28", "Hypervisor injection"}, {"29", "VMM communication"}, {"30", "Security exception"},
+    {"31", "Reserved"}
+};
+
+void isr_handler_c(registers_t *r){
+    const char *reason = "Unhandled exception";
+
+    if (r->int_no < 32) {
+        reason = exc[r->int_no].detail;
+    }
+
+    kernel_panic(reason, r);
 }
 
-static void vga_puts(const char* s){
-    while (*s)
-        vga_putc(*s++);
-}
+void kernel_main(uint32_t mb_info_addr) {
+   vga_set_color(0x0F, 0x00);
+   vga_clear();
 
-static void vga_puthex(uint32_t v){
-    const char* h = "0123456789ABCDEF";
-    vga_puts("0x");
-    for (int i = 28; i >= 0; i -=4)
-        vga_putc(h[(v >> i) & 0xF]);
-}
+   klog_info("booting kernel");
 
-
-void isr_handler_c(struct regs* r){
-    cursor = 160;
-
-    vga_puts("EXCEPTION: ");
-
-    if (r->int_no < 32)
-        vga_puts(exc[r->int_no]);
-    else
-        vga_puts("UNKNOWN");
-
-    vga_puts("\nINT: ");
-    vga_puthex(r->int_no);
-
-    vga_puts(" ERR: ");
-    vga_puthex(r->err);
-
-    asm volatile ("cli");
-    for (;;);
-}
-
-void irq_handler_c(struct regs* r) {
-  if (r->int_no >= 32 && r->int_no <= 47) {
-      //IRQ recebida
-      pic_send_eoi(r->int_no -32);
-  }
-}
-
-void kernel_main(void) {
-   gdt_init();
    idt_init();
    idt_install_isrs();
    idt_install_irqs();
@@ -67,35 +53,30 @@ void kernel_main(void) {
    pic_remap(0x20, 0x28);
    pic_mask_all();
 
-   pic_unmask_irq(0);
+   pic_unmask_irq(0); /* timer */
+   pic_unmask_irq(1); /* keyboard */
 
-    volatile char* vga = (volatile char*)0xB8000;
-    vga[0]  = 'O';
-    vga[1]  = 0x0F;
-    vga[2]  = 'K';
-    vga[3]  = 0x0F;
-    vga[4]  = ' ';
-    vga[5]  = 0x0F;
-    vga[6]  = 'K';
-    vga[7]  = 0x0F;
-    vga[8]  = 'E';
-    vga[9]  = 0x0F;
-    vga[10] = 'R';
-    vga[11] = 0x0F;
-    vga[12] = 'N';
-    vga[13] = 0x0F;
-    vga[14] = 'E';
-    vga[15] = 0x0F;
-    vga[16] = 'L';
-    vga[17] = 0x0F;
-    vga[18] = ' ';
-    vga[19] = 0x0F;
-    vga[20] = '!';
-    vga[21] = 0x0F;
+   irq_init(100, 25);
 
+   pmm_init_from_multiboot(mb_info_addr, (uintptr_t)&_kernel_start, (uintptr_t)&_kernel_end);
+   uint32_t frame = pmm_alloc_frame();
 
-    asm volatile ("sti");
-   // asm volatile ("int $0x03");
+   vmm_init();
 
-    for(;;);
+   klog_info("interrupts configured");
+   vga_puts("PMM free frames=");
+   vga_putdec(pmm_free_frame_count());
+   vga_puts(" alloc=");
+   vga_puthex(frame);
+   vga_puts(" VMM=");
+   vga_puts(vmm_is_enabled() ? "ON" : "OFF");
+   vga_puts("\n");
+
+   asm volatile ("sti");
+
+   shell_init();
+
+   for(;;) {
+       asm volatile ("hlt");
+   }
 }
