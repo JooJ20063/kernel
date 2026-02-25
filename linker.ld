@@ -2,8 +2,8 @@ ENTRY(_start)
 
 SECTIONS
 {
-    /* Kernel começa em 1MB */
     . = 1M;
+    _kernel_start = .;
 
     .text ALIGN(4K) : {
         *(.multiboot)
@@ -22,4 +22,6 @@ SECTIONS
         *(COMMON)
         *(.bss*)
     }
+
+    _kernel_end = .;
 }
