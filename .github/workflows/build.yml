@@ -24,6 +24,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends gcc-multilib binutils
 
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+
+      - name: Sanity checks (kernel entry + multiboot2 symbols)
+        run: |
+          test "$(rg -n '^void kernel_main\(' kernel/kernel.c | wc -l)" -eq 1
+          rg -n '^#define MULTIBOOT2_TAG_END ' include/kernel/multiboot2.h
+          rg -n '^#define MULTIBOOT2_TAG_MMAP ' include/kernel/multiboot2.h
+          rg -n '^#define MULTIBOOT2_MMAP_AVAILABLE ' include/kernel/multiboot2.h
+          rg -n 'struct multiboot2_tag\b' include/kernel/multiboot2.h
+          rg -n 'struct multiboot2_tag_mmap\b' include/kernel/multiboot2.h
+          rg -n 'struct multiboot2_mmap_entry\b' include/kernel/multiboot2.h
+          rg -n '^#include <kernel/multiboot2.h>' kernel/pmm.c
+
+      - name: Build kernel
+        run: |
+          make clean
+          make
       - name: Build kernel
         run: make
 

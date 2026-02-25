@@ -42,7 +42,8 @@ Kernel educacional em **C + Assembly (x86 32-bit)** com:
 - **Shell primitivo** (linha de comando no VGA).
 - **IRQ0**: timer configurável + tick do scheduler.
 - **IRQ1**: teclado com Shift/CapsLock e mapa ABNT2 base.
-- **PMM**: alocador/liberador de frames físicos de 4 KiB.
+- **PMM**: alocador/liberador de frames físicos de 4 KiB, inicializado via mapa de memória do Multiboot2.
+- **VMM**: paginação habilitada com mapeamento identidade inicial para o bootstrap.
 
 ## Comandos do shell
 
@@ -71,8 +72,9 @@ make clean
 ## CI
 
 Há workflow em `.github/workflows/build.yml` rodando:
-- `make`
+- `make clean && make`
 - `make check`
+- sanity check: definição única de `kernel_main` em `kernel/kernel.c`
 
 ## Observações
 
@@ -85,3 +87,4 @@ Há workflow em `.github/workflows/build.yml` rodando:
 - [Arquitetura](docs/ARCHITECTURE.md)
 - [Shell](docs/SHELL.md)
 - [Guia de desenvolvimento](docs/DEVELOPMENT.md)
+- [Proteção de memória (plano)](docs/MEMORY_PROTECTION.md)

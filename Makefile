@@ -11,6 +11,7 @@ BUILD_DIR := build
 C_SRCS := \
 	kernel/kernel.c \
 	kernel/vga.c \
+	kernel/vmm.c \
 	kernel/pmm.c \
 	kernel/sched.c \
 	kernel/klog.c \

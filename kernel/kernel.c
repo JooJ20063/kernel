@@ -3,6 +3,7 @@
 #include <arch/x86/irq.h>
 #include <kernel/vga.h>
 #include <kernel/pmm.h>
+#include <kernel/vmm.h>
 #include <kernel/panic.h>
 #include <kernel/klog.h>
 #include <kernel/shell.h>
@@ -11,6 +12,9 @@ struct exception_info {
     const char *name;
     const char *detail;
 };
+
+extern uint8_t _kernel_start;
+extern uint8_t _kernel_end;
 
 static const struct exception_info exc[] = {
     {"#DE", "Divide Error"}, {"#DB", "Debug"}, {"NMI", "Non-maskable interrupt"},
@@ -36,7 +40,7 @@ void isr_handler_c(registers_t *r){
     kernel_panic(reason, r);
 }
 
-void kernel_main(void) {
+void kernel_main(uint32_t mb_info_addr) {
    vga_set_color(0x0F, 0x00);
    vga_clear();
 
@@ -54,14 +58,18 @@ void kernel_main(void) {
 
    irq_init(100, 25);
 
-   pmm_init(64U * 1024U * 1024U);
+   pmm_init_from_multiboot(mb_info_addr, (uintptr_t)&_kernel_start, (uintptr_t)&_kernel_end);
    uint32_t frame = pmm_alloc_frame();
+
+   vmm_init();
 
    klog_info("interrupts configured");
    vga_puts("PMM free frames=");
    vga_putdec(pmm_free_frame_count());
    vga_puts(" alloc=");
    vga_puthex(frame);
+   vga_puts(" VMM=");
+   vga_puts(vmm_is_enabled() ? "ON" : "OFF");
    vga_puts("\n");
 
    asm volatile ("sti");
