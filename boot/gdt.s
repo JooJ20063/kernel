@@ -15,3 +15,5 @@ gdt_end:
 gdt_descriptor:
     .word gdt_end - gdt_start - 1
     .long gdt_start
+
+.section .note.GNU-stack,"",@progbits

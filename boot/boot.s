@@ -46,7 +46,9 @@ _start:
 flush_cs:
     mov $stack_top, %esp
 
+    push %ebx               # multiboot2 info pointer
     call kernel_main
+    add $4, %esp
 
 hang:
     hlt
@@ -58,3 +60,5 @@ hang:
 stack_bottom:
     .skip 16384
 stack_top:
+
+.section .note.GNU-stack,"",@progbits

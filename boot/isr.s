@@ -84,3 +84,5 @@ isr_common_stub:
 
     add $8, %esp
     iret
+
+.section .note.GNU-stack,"",@progbits
