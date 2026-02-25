@@ -1,7 +1,6 @@
 #include <kernel/pmm.h>
-#include <kernel/multiboot2.h>
 
-#define PMM_MAX_MEMORY (512U * 1024U * 1024U)
+#define PMM_MAX_MEMORY (64U * 1024U * 1024U)
 #define PMM_MAX_FRAMES (PMM_MAX_MEMORY / PMM_FRAME_SIZE)
 
 static uint8_t frame_bitmap[PMM_MAX_FRAMES / 8];
@@ -113,6 +112,10 @@ void pmm_init_from_multiboot(uint32_t mb_info_addr, uintptr_t kernel_start, uint
     pmm_mark_range(0, 0x100000U, 1);
     pmm_mark_range(kernel_start, kernel_end, 1);
     pmm_mark_range((uintptr_t)mb_info_addr, info_end, 1);
+    for (uint32_t frame = 0x100000U / PMM_FRAME_SIZE; frame < total_frames; ++frame) {
+        clear_bit(frame);
+        free_frames++;
+    }
 }
 
 uint32_t pmm_alloc_frame(void) {

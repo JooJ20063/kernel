@@ -6,6 +6,7 @@ Kernel educacional em **C + Assembly (x86 32-bit)** com:
 - teclado PS/2 (ABNT2 base, Shift/CapsLock)
 - PMM (bitmap de frames via Multiboot2 memory map)
 - VMM (paginação com mapeamento identidade inicial)
+- PMM (bitmap de frames)
 - scheduler round-robin simples
 - VGA text mode + logging + shell primitivo
 
@@ -45,6 +46,7 @@ Kernel educacional em **C + Assembly (x86 32-bit)** com:
 - **IRQ1**: teclado com Shift/CapsLock e mapa ABNT2 base.
 - **PMM**: alocador/liberador de frames físicos de 4 KiB, inicializado via mapa de memória do Multiboot2.
 - **VMM**: paginação habilitada com mapeamento identidade inicial para o bootstrap.
+- **PMM**: alocador/liberador de frames físicos de 4 KiB.
 
 ## Comandos do shell
 
@@ -76,6 +78,8 @@ Há workflow em `.github/workflows/build.yml` rodando:
 - `make clean && make`
 - `make check`
 - sanity check: definição única de `kernel_main` em `kernel/kernel.c`
+- `make`
+- `make check`
 
 ## Observações
 

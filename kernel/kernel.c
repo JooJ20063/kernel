@@ -40,7 +40,7 @@ void isr_handler_c(registers_t *r){
     kernel_panic(reason, r);
 }
 
-void kernel_main(uint32_t mb_info_addr) {
+void kernel_main(void) {
    vga_set_color(0x0F, 0x00);
    vga_clear();
 
@@ -58,10 +58,8 @@ void kernel_main(uint32_t mb_info_addr) {
 
    irq_init(100, 25);
 
-   pmm_init_from_multiboot(mb_info_addr, (uintptr_t)&_kernel_start, (uintptr_t)&_kernel_end);
+   pmm_init(64U * 1024U * 1024U);
    uint32_t frame = pmm_alloc_frame();
-
-   vmm_init();
 
    klog_info("interrupts configured");
    vga_puts("PMM free frames=");
