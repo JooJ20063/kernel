@@ -2,6 +2,7 @@
 #include <kernel/kmalloc.h>
 
 #define TAR_BLOCK_SIZE 512U
+#define RAMFS_NEW_FILE_CAPACITY 256U
 
 struct tar_header {
     char name[100];
@@ -26,6 +27,8 @@ struct tar_header {
 struct ramfs_entry {
     fs_node_t node;
     uintptr_t data_ptr;
+    uint32_t capacity;
+    uint8_t writable;
     struct ramfs_entry *next;
 };
 
@@ -36,6 +39,31 @@ static void mem_zero(uint8_t *dst, uint32_t size) {
     for (uint32_t i = 0; i < size; ++i) {
         dst[i] = 0;
     }
+}
+
+static void mem_copy(uint8_t *dst, const uint8_t *src, uint32_t size) {
+    for (uint32_t i = 0; i < size; ++i) {
+        dst[i] = src[i];
+    }
+}
+
+static int str_eq(const char *a, const char *b) {
+    while (*a && *b) {
+        if (*a != *b) {
+            return 0;
+        }
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
+static uint32_t str_len(const char *s) {
+    uint32_t n = 0;
+    while (s[n] != 0) {
+        n++;
+    }
+    return n;
 }
 
 static void str_copy_limit(char *dst, const char *src, uint32_t limit) {
@@ -110,6 +138,59 @@ static uint32_t ramfs_read(fs_node_t *node, uint32_t offset, uint32_t size, uint
     return size;
 }
 
+static uint32_t ramfs_write(fs_node_t *node, uint32_t offset, uint32_t size, const uint8_t *buffer) {
+    struct ramfs_entry *entry;
+    uint32_t need;
+
+    if (node == 0 || buffer == 0 || node->device == 0) {
+        return 0;
+    }
+
+    if ((node->flags & FS_FILE) == 0) {
+        return 0;
+    }
+
+    entry = (struct ramfs_entry *)node->device;
+
+    if (entry->writable == 0) {
+        return 0;
+    }
+
+    need = offset + size;
+
+    if (need > entry->capacity) {
+        uint32_t new_capacity = entry->capacity;
+        uint8_t *new_data;
+
+        while (new_capacity < need) {
+            new_capacity <<= 1;
+            if (new_capacity == 0) {
+                return 0;
+            }
+        }
+
+        new_data = (uint8_t *)kmalloc(new_capacity);
+        if (new_data == 0) {
+            return 0;
+        }
+
+        if (node->size > 0) {
+            mem_copy(new_data, (const uint8_t *)(uintptr_t)entry->data_ptr, node->size);
+        }
+
+        entry->data_ptr = (uintptr_t)new_data;
+        entry->capacity = new_capacity;
+    }
+
+    mem_copy((uint8_t *)(uintptr_t)(entry->data_ptr + offset), buffer, size);
+
+    if (need > node->size) {
+        node->size = need;
+    }
+
+    return size;
+}
+
 static fs_node_t *ramfs_readdir(fs_node_t *node, uint32_t index) {
     struct ramfs_entry *cur;
     uint32_t current_index = 0;
@@ -130,16 +211,47 @@ static fs_node_t *ramfs_readdir(fs_node_t *node, uint32_t index) {
     return 0;
 }
 
-static uint32_t ramfs_write_unsupported(fs_node_t *node, uint32_t offset, uint32_t size, const uint8_t *buffer) {
-    (void)node;
-    (void)offset;
-    (void)size;
-    (void)buffer;
-    return 0;
-}
-
 static void ramfs_noop(fs_node_t *node) {
     (void)node;
+}
+
+static fs_node_t *ramfs_add_writable_file(const char *name) {
+    struct ramfs_entry *entry;
+    uint8_t *data;
+
+    if (name == 0 || *name == 0) {
+        return 0;
+    }
+
+    entry = (struct ramfs_entry *)kmalloc((uint32_t)sizeof(struct ramfs_entry));
+    if (entry == 0) {
+        return 0;
+    }
+
+    data = (uint8_t *)kmalloc(RAMFS_NEW_FILE_CAPACITY);
+    if (data == 0) {
+        return 0;
+    }
+
+    mem_zero((uint8_t *)entry, (uint32_t)sizeof(struct ramfs_entry));
+    mem_zero(data, RAMFS_NEW_FILE_CAPACITY);
+
+    str_copy_limit(entry->node.name, name, sizeof(entry->node.name));
+    entry->node.flags = FS_FILE;
+    entry->node.size = 0;
+    entry->node.read = ramfs_read;
+    entry->node.write = ramfs_write;
+    entry->node.open = ramfs_noop;
+    entry->node.close = ramfs_noop;
+    entry->node.device = entry;
+
+    entry->data_ptr = (uintptr_t)data;
+    entry->capacity = RAMFS_NEW_FILE_CAPACITY;
+    entry->writable = 1;
+    entry->next = ramfs_head;
+    ramfs_head = entry;
+
+    return &entry->node;
 }
 
 void init_ramfs(uintptr_t start, uintptr_t end) {
@@ -178,11 +290,13 @@ void init_ramfs(uintptr_t start, uintptr_t end) {
             entry->node.flags = FS_FILE;
             entry->node.size = file_size;
             entry->node.read = ramfs_read;
-            entry->node.write = ramfs_write_unsupported;
+            entry->node.write = ramfs_write;
             entry->node.open = ramfs_noop;
             entry->node.close = ramfs_noop;
             entry->node.device = entry;
             entry->data_ptr = p + TAR_BLOCK_SIZE;
+            entry->capacity = file_size;
+            entry->writable = 0;
 
             if (ramfs_head == 0) {
                 ramfs_head = entry;
@@ -194,9 +308,36 @@ void init_ramfs(uintptr_t start, uintptr_t end) {
 
         p += TAR_BLOCK_SIZE + ((uintptr_t)blocks * TAR_BLOCK_SIZE);
     }
-
 }
 
 fs_node_t *ramfs_root(void) {
     return &ramfs_root_node;
+}
+
+fs_node_t *ramfs_find(const char *name) {
+    struct ramfs_entry *cur = ramfs_head;
+
+    while (cur != 0) {
+        if (str_eq(cur->node.name, name)) {
+            return &cur->node;
+        }
+        cur = cur->next;
+    }
+
+    return 0;
+}
+
+fs_node_t *ramfs_touch(const char *name) {
+    fs_node_t *existing;
+
+    if (name == 0 || *name == 0 || str_len(name) >= 128U) {
+        return 0;
+    }
+
+    existing = ramfs_find(name);
+    if (existing != 0) {
+        return existing;
+    }
+
+    return ramfs_add_writable_file(name);
 }

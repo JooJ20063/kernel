@@ -17,6 +17,9 @@ Fornecer uma interface mínima para inspeção/debug em runtime.
 - `kmalloc <bytes>`: aloca memória no heap de kernel, escreve padrão de teste e imprime endereço.
 - `ls`: lista entradas do RAMFS no VFS raiz.
 - `cat <arquivo>`: lê arquivo do RAMFS via VFS.
+- `touch <arquivo>`: cria arquivo vazio no RAMFS (se não existir).
+- `echo <texto> > <arquivo>`: cria/sobrescreve arquivo no RAMFS.
+- `cat > <arquivo> <texto>`: atalho de escrita usando `cat` em modo simples.
 - `echo <texto>`: imprime texto.
 - `panic`: aciona panic manual.
 - `panic int3`: dispara breakpoint exception.
@@ -77,6 +80,9 @@ Diferente de shells de alto nível, esta interface foi construída com foco em e
 | `kmalloc <n>` | Aloca `n` bytes e faz write-test. | Teste positivo de mapeamento e escrita de heap. |
 | `ls` | Lista os nós montados no RAMFS. | Verifica parser TAR e enumeração de diretório. |
 | `cat <arquivo>` | Lê arquivo via `read_fs`. | Verifica caminho de leitura VFS->RAMFS. |
+| `touch <arquivo>` | Cria arquivo vazio no RAMFS. | Valida criação dinâmica de nós no VFS. |
+| `echo <txt> > <arquivo>` | Escreve/sobrescreve conteúdo textual. | Valida caminho de escrita VFS->RAMFS. |
+| `cat > <arquivo> <txt>` | Escrita simplificada via comando `cat`. | Exercita criação/escrita por fluxo alternativo. |
 
 ### 📝 Utilitários de Output
 | Comando | Descrição | Comportamento |

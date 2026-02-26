@@ -36,6 +36,52 @@ static int str_starts(const char *a, const char *prefix) {
     return 1;
 }
 
+static uint32_t str_len(const char *s) {
+    uint32_t n = 0;
+    while (s[n] != 0) {
+        n++;
+    }
+    return n;
+}
+
+static int str_find(const char *s, const char *pat) {
+    uint32_t i = 0;
+
+    if (pat[0] == 0) {
+        return 0;
+    }
+
+    while (s[i] != 0) {
+        uint32_t j = 0;
+        while (pat[j] != 0 && s[i + j] != 0 && s[i + j] == pat[j]) {
+            j++;
+        }
+
+        if (pat[j] == 0) {
+            return (int)i;
+        }
+
+        i++;
+    }
+
+    return -1;
+}
+
+static void str_copy_range(char *dst, uint32_t dst_cap, const char *src, uint32_t start, uint32_t end) {
+    uint32_t i = 0;
+
+    if (dst_cap == 0) {
+        return;
+    }
+
+    while ((start + i) < end && src[start + i] != 0 && i + 1U < dst_cap) {
+        dst[i] = src[start + i];
+        i++;
+    }
+
+    dst[i] = 0;
+}
+
 static uint32_t parse_u32(const char *s, int *ok) {
     uint32_t v = 0;
     *ok = 0;
@@ -111,8 +157,6 @@ static void shell_cmd_panic(const char *arg) {
     klog_warn("panic usage: panic [int3|ud2|div0|null|int <n>]");
 }
 
-
-
 static void shell_cmd_ls(void) {
     fs_node_t *root = ramfs_root();
     uint32_t i = 0;
@@ -139,51 +183,92 @@ static void shell_cmd_ls(void) {
 }
 
 static void shell_cmd_cat(const char *name) {
-    fs_node_t *root = ramfs_root();
-    uint32_t i = 0;
+    fs_node_t *entry;
 
     if (name == 0 || *name == 0) {
         klog_warn("usage: cat <arquivo>");
         return;
     }
 
-    for (;;) {
-        fs_node_t *entry = readdir_fs(root, i);
-        if (entry == 0) {
-            break;
-        }
-
-        if (str_eq(entry->name, name)) {
-            uint8_t buf[64];
-            uint32_t off = 0;
-
-            while (off < entry->size) {
-                uint32_t n = read_fs(entry, off, sizeof(buf), buf);
-                if (n == 0) {
-                    break;
-                }
-
-                for (uint32_t j = 0; j < n; ++j) {
-                    vga_putc((char)buf[j]);
-                }
-
-                off += n;
-            }
-
-            vga_puts("\n");
-            return;
-        }
-
-        i++;
+    entry = ramfs_find(name);
+    if (entry == 0) {
+        klog_warn("arquivo nao encontrado");
+        return;
     }
 
-    klog_warn("arquivo nao encontrado");
+    {
+        uint8_t buf[64];
+        uint32_t off = 0;
+
+        while (off < entry->size) {
+            uint32_t n = read_fs(entry, off, sizeof(buf), buf);
+            if (n == 0) {
+                break;
+            }
+
+            for (uint32_t j = 0; j < n; ++j) {
+                vga_putc((char)buf[j]);
+            }
+
+            off += n;
+        }
+    }
+
+    vga_puts("\n");
+}
+
+static void shell_write_text_file(const char *name, const char *text) {
+    fs_node_t *entry;
+    uint32_t n;
+
+    if (name == 0 || *name == 0) {
+        klog_warn("arquivo invalido");
+        return;
+    }
+
+    entry = ramfs_touch(name);
+    if (entry == 0) {
+        klog_warn("falha ao criar/abrir arquivo");
+        return;
+    }
+
+    n = write_fs(entry, 0, str_len(text), (const uint8_t *)text);
+    if (n != str_len(text)) {
+        klog_warn("arquivo somente leitura ou sem memoria");
+        return;
+    }
+
+    entry->size = n;
+    vga_puts("ok: ");
+    vga_puts(name);
+    vga_puts(" <= ");
+    vga_putdec(n);
+    vga_puts(" bytes\n");
+}
+
+static void shell_cmd_touch(const char *name) {
+    fs_node_t *entry;
+
+    if (name == 0 || *name == 0) {
+        klog_warn("usage: touch <arquivo>");
+        return;
+    }
+
+    entry = ramfs_touch(name);
+    if (entry == 0) {
+        klog_warn("touch falhou");
+        return;
+    }
+
+    vga_puts("touch: ");
+    vga_puts(entry->name);
+    vga_puts("\n");
 }
 
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task pmm vmm wp nullguard kmalloc kheap ls cat echo panic\n");
-        vga_puts("kmalloc <bytes>: alloc + write-test ring0 heap\n");
+        vga_puts("cmds: help clear ticks task pmm vmm wp nullguard kmalloc kheap ls cat touch echo panic\n");
+        vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0 | panic null | panic int <n>\n");
     } else if (str_eq(cmd, "clear")) {
         vga_clear();
@@ -253,11 +338,43 @@ static void shell_run_command(const char *cmd) {
         }
     } else if (str_eq(cmd, "ls")) {
         shell_cmd_ls();
+    } else if (str_starts(cmd, "touch ")) {
+        shell_cmd_touch(cmd + 6);
+    } else if (str_starts(cmd, "cat > ")) {
+        uint32_t i = 6;
+        uint32_t file_start = i;
+        char name[128];
+
+        while (cmd[i] != 0 && cmd[i] != ' ') {
+            i++;
+        }
+
+        str_copy_range(name, sizeof(name), cmd, file_start, i);
+
+        if (cmd[i] == ' ') {
+            i++;
+        }
+
+        shell_write_text_file(name, cmd + i);
     } else if (str_starts(cmd, "cat ")) {
         shell_cmd_cat(cmd + 4);
     } else if (str_starts(cmd, "echo ")) {
-        vga_puts(cmd + 5);
-        vga_puts("\n");
+        int sep = str_find(cmd + 5, " > ");
+
+        if (sep >= 0) {
+            char text[128];
+            char file[128];
+            uint32_t base = 5U;
+            uint32_t split = base + (uint32_t)sep;
+            uint32_t total = str_len(cmd);
+
+            str_copy_range(text, sizeof(text), cmd, base, split);
+            str_copy_range(file, sizeof(file), cmd, split + 3U, total);
+            shell_write_text_file(file, text);
+        } else {
+            vga_puts(cmd + 5);
+            vga_puts("\n");
+        }
     } else if (str_eq(cmd, "panic") || str_starts(cmd, "panic ")) {
         shell_cmd_panic(cmd[5] ? cmd + 6 : 0);
     } else if (cmd[0] != 0) {

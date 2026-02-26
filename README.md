@@ -61,6 +61,9 @@ Kernel educacional em **C + Assembly (x86 32-bit)** com:
 - `kmalloc <bytes>`
 - `ls`
 - `cat <arquivo>`
+- `touch <arquivo>`
+- `echo <texto> > <arquivo>`
+- `cat > <arquivo> <texto>`
 - `echo <texto>`
 - `panic`
 - `panic int3`
