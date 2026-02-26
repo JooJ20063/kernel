@@ -43,7 +43,9 @@ Kernel educacional em **C + Assembly (x86 32-bit)** com:
 - **IRQ0**: timer configurável + tick do scheduler.
 - **IRQ1**: teclado com Shift/CapsLock e mapa ABNT2 base.
 - **PMM**: alocador/liberador de frames físicos de 4 KiB, inicializado via mapa de memória do Multiboot2.
-- **VMM**: paginação habilitada com mapeamento identidade inicial para o bootstrap.
+- **VMM**: paginação habilitada com mapeamento identidade inicial para o bootstrap e hardening de páginas `.text`/`.rodata` como read-only (com CR0.WP).
+- **kmalloc**: heap simples de kernel (bump allocator) sobre PMM+VMM para testes em Ring 0.
+- **VFS/RAMFS**: camada VFS mínima e RAMFS sobre TAR (initramfs) sem cópia de payload, com interface POSIX-like (`read`, `write`, `open`, `close`, `readdir`).
 
 ## Comandos do shell
 
@@ -52,6 +54,13 @@ Kernel educacional em **C + Assembly (x86 32-bit)** com:
 - `ticks`
 - `task`
 - `pmm`
+- `vmm`
+- `wp`
+- `nullguard`
+- `kheap`
+- `kmalloc <bytes>`
+- `ls`
+- `cat <arquivo>`
 - `echo <texto>`
 - `panic`
 - `panic int3`

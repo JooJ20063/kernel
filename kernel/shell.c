@@ -2,8 +2,12 @@
 #include <kernel/vga.h>
 #include <kernel/klog.h>
 #include <kernel/pmm.h>
+#include <kernel/vmm.h>
+#include <kernel/kmalloc.h>
 #include <kernel/sched.h>
 #include <kernel/panic.h>
+#include <kernel/vfs.h>
+#include <kernel/ramfs.h>
 #include <arch/x86/irq.h>
 #include <arch/x86/regs.h>
 
@@ -107,9 +111,79 @@ static void shell_cmd_panic(const char *arg) {
     klog_warn("panic usage: panic [int3|ud2|div0|null|int <n>]");
 }
 
+
+
+static void shell_cmd_ls(void) {
+    fs_node_t *root = ramfs_root();
+    uint32_t i = 0;
+
+    vga_puts("ramfs entries:\n");
+
+    for (;;) {
+        fs_node_t *entry = readdir_fs(root, i);
+        if (entry == 0) {
+            break;
+        }
+
+        vga_puts(" - ");
+        vga_puts(entry->name);
+        vga_puts(" (");
+        vga_putdec(entry->size);
+        vga_puts(" bytes)\n");
+        i++;
+    }
+
+    if (i == 0) {
+        vga_puts("(vazio)\n");
+    }
+}
+
+static void shell_cmd_cat(const char *name) {
+    fs_node_t *root = ramfs_root();
+    uint32_t i = 0;
+
+    if (name == 0 || *name == 0) {
+        klog_warn("usage: cat <arquivo>");
+        return;
+    }
+
+    for (;;) {
+        fs_node_t *entry = readdir_fs(root, i);
+        if (entry == 0) {
+            break;
+        }
+
+        if (str_eq(entry->name, name)) {
+            uint8_t buf[64];
+            uint32_t off = 0;
+
+            while (off < entry->size) {
+                uint32_t n = read_fs(entry, off, sizeof(buf), buf);
+                if (n == 0) {
+                    break;
+                }
+
+                for (uint32_t j = 0; j < n; ++j) {
+                    vga_putc((char)buf[j]);
+                }
+
+                off += n;
+            }
+
+            vga_puts("\n");
+            return;
+        }
+
+        i++;
+    }
+
+    klog_warn("arquivo nao encontrado");
+}
+
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task pmm echo panic\n");
+        vga_puts("cmds: help clear ticks task pmm vmm wp nullguard kmalloc kheap ls cat echo panic\n");
+        vga_puts("kmalloc <bytes>: alloc + write-test ring0 heap\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0 | panic null | panic int <n>\n");
     } else if (str_eq(cmd, "clear")) {
         vga_clear();
@@ -133,6 +207,54 @@ static void shell_run_command(const char *cmd) {
         vga_puts(" free=");
         vga_putdec(pmm_free_frame_count());
         vga_puts("\n");
+    } else if (str_eq(cmd, "vmm")) {
+        vga_puts("paging=");
+        vga_puts(vmm_is_enabled() ? "ON" : "OFF");
+        vga_puts(" wp=");
+        vga_puts(vmm_wp_is_enabled() ? "ON" : "OFF");
+        vga_puts("\n");
+    } else if (str_eq(cmd, "wp")) {
+        vga_puts("CR0.WP=");
+        vga_puts(vmm_wp_is_enabled() ? "ON" : "OFF");
+        vga_puts("\n");
+    } else if (str_eq(cmd, "nullguard")) {
+        vga_puts("null-page guard ativo (0x0 sem mapeamento). Teste com: panic null\n");
+    } else if (str_eq(cmd, "kheap")) {
+        vga_puts("kheap used=");
+        vga_putdec(kmalloc_bytes_used());
+        vga_puts(" mapped=");
+        vga_putdec(kmalloc_bytes_mapped());
+        vga_puts("\n");
+    } else if (str_starts(cmd, "kmalloc ")) {
+        int ok;
+        uint32_t sz = parse_u32(cmd + 8, &ok);
+
+        if (!ok || sz == 0) {
+            klog_warn("usage: kmalloc <bytes>");
+            return;
+        }
+
+        {
+            uint32_t *ptr = (uint32_t *)kmalloc(sz);
+            if (ptr == 0) {
+                klog_warn("kmalloc failed");
+                return;
+            }
+
+            *ptr = 0xCAFEBABEU;
+
+            vga_puts("kmalloc ok ptr=");
+            vga_puthex((uint32_t)(uintptr_t)ptr);
+            vga_puts(" test=");
+            vga_puthex(*ptr);
+            vga_puts(" used=");
+            vga_putdec(kmalloc_bytes_used());
+            vga_puts("\n");
+        }
+    } else if (str_eq(cmd, "ls")) {
+        shell_cmd_ls();
+    } else if (str_starts(cmd, "cat ")) {
+        shell_cmd_cat(cmd + 4);
     } else if (str_starts(cmd, "echo ")) {
         vga_puts(cmd + 5);
         vga_puts("\n");

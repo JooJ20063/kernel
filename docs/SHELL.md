@@ -10,6 +10,13 @@ Fornecer uma interface mínima para inspeção/debug em runtime.
 - `ticks`: mostra ticks, segundos e HZ do timer.
 - `task`: mostra tarefa atual e switches do scheduler.
 - `pmm`: mostra total/livres de frames do PMM.
+- `vmm`: estado da paginação e do bit CR0.WP.
+- `wp`: mostra apenas estado do CR0.WP.
+- `nullguard`: lembrete de teste do null-page guard.
+- `kheap`: estado do heap do kernel (`kmalloc`).
+- `kmalloc <bytes>`: aloca memória no heap de kernel, escreve padrão de teste e imprime endereço.
+- `ls`: lista entradas do RAMFS no VFS raiz.
+- `cat <arquivo>`: lê arquivo do RAMFS via VFS.
 - `echo <texto>`: imprime texto.
 - `panic`: aciona panic manual.
 - `panic int3`: dispara breakpoint exception.
@@ -63,6 +70,13 @@ Diferente de shells de alto nível, esta interface foi construída com foco em e
 | `ticks` | Exibe Ticks, Segundos e frequência Hz. | Validação da precisão do Timer (IRQ0). |
 | `task` | Identifica a tarefa e context switches. | Monitorização da saúde do Scheduler. |
 | `pmm` | Reporta o estado da memória física. | Verificação de fugas de memória (frames). |
+| `vmm` | Exibe estado do paging e CR0.WP. | Auditoria de hardening da memória no Ring 0. |
+| `wp` | Mostra apenas CR0.WP. | Confirma proteção de escrita em páginas RO. |
+| `nullguard` | Explica teste de null-page guard. | Verifica captura de ponteiro nulo via `panic null`. |
+| `kheap` | Exibe bytes usados/mapeados no heap. | Inspeção do uso de `kmalloc`. |
+| `kmalloc <n>` | Aloca `n` bytes e faz write-test. | Teste positivo de mapeamento e escrita de heap. |
+| `ls` | Lista os nós montados no RAMFS. | Verifica parser TAR e enumeração de diretório. |
+| `cat <arquivo>` | Lê arquivo via `read_fs`. | Verifica caminho de leitura VFS->RAMFS. |
 
 ### 📝 Utilitários de Output
 | Comando | Descrição | Comportamento |
