@@ -6,6 +6,8 @@
 #include <kernel/kmalloc.h>
 #include <kernel/sched.h>
 #include <kernel/panic.h>
+#include <kernel/vfs.h>
+#include <kernel/ramfs.h>
 #include <arch/x86/irq.h>
 #include <arch/x86/regs.h>
 
@@ -109,9 +111,78 @@ static void shell_cmd_panic(const char *arg) {
     klog_warn("panic usage: panic [int3|ud2|div0|null|int <n>]");
 }
 
+
+
+static void shell_cmd_ls(void) {
+    fs_node_t *root = ramfs_root();
+    uint32_t i = 0;
+
+    vga_puts("ramfs entries:\n");
+
+    for (;;) {
+        fs_node_t *entry = readdir_fs(root, i);
+        if (entry == 0) {
+            break;
+        }
+
+        vga_puts(" - ");
+        vga_puts(entry->name);
+        vga_puts(" (");
+        vga_putdec(entry->size);
+        vga_puts(" bytes)\n");
+        i++;
+    }
+
+    if (i == 0) {
+        vga_puts("(vazio)\n");
+    }
+}
+
+static void shell_cmd_cat(const char *name) {
+    fs_node_t *root = ramfs_root();
+    uint32_t i = 0;
+
+    if (name == 0 || *name == 0) {
+        klog_warn("usage: cat <arquivo>");
+        return;
+    }
+
+    for (;;) {
+        fs_node_t *entry = readdir_fs(root, i);
+        if (entry == 0) {
+            break;
+        }
+
+        if (str_eq(entry->name, name)) {
+            uint8_t buf[64];
+            uint32_t off = 0;
+
+            while (off < entry->size) {
+                uint32_t n = read_fs(entry, off, sizeof(buf), buf);
+                if (n == 0) {
+                    break;
+                }
+
+                for (uint32_t j = 0; j < n; ++j) {
+                    vga_putc((char)buf[j]);
+                }
+
+                off += n;
+            }
+
+            vga_puts("\n");
+            return;
+        }
+
+        i++;
+    }
+
+    klog_warn("arquivo nao encontrado");
+}
+
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task pmm vmm wp nullguard kmalloc kheap echo panic\n");
+        vga_puts("cmds: help clear ticks task pmm vmm wp nullguard kmalloc kheap ls cat echo panic\n");
         vga_puts("kmalloc <bytes>: alloc + write-test ring0 heap\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0 | panic null | panic int <n>\n");
     } else if (str_eq(cmd, "clear")) {
@@ -180,6 +251,10 @@ static void shell_run_command(const char *cmd) {
             vga_putdec(kmalloc_bytes_used());
             vga_puts("\n");
         }
+    } else if (str_eq(cmd, "ls")) {
+        shell_cmd_ls();
+    } else if (str_starts(cmd, "cat ")) {
+        shell_cmd_cat(cmd + 4);
     } else if (str_starts(cmd, "echo ")) {
         vga_puts(cmd + 5);
         vga_puts("\n");

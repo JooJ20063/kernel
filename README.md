@@ -45,6 +45,7 @@ Kernel educacional em **C + Assembly (x86 32-bit)** com:
 - **PMM**: alocador/liberador de frames físicos de 4 KiB, inicializado via mapa de memória do Multiboot2.
 - **VMM**: paginação habilitada com mapeamento identidade inicial para o bootstrap e hardening de páginas `.text`/`.rodata` como read-only (com CR0.WP).
 - **kmalloc**: heap simples de kernel (bump allocator) sobre PMM+VMM para testes em Ring 0.
+- **VFS/RAMFS**: camada VFS mínima e RAMFS sobre TAR (initramfs) sem cópia de payload, com interface POSIX-like (`read`, `write`, `open`, `close`, `readdir`).
 
 ## Comandos do shell
 
@@ -58,6 +59,8 @@ Kernel educacional em **C + Assembly (x86 32-bit)** com:
 - `nullguard`
 - `kheap`
 - `kmalloc <bytes>`
+- `ls`
+- `cat <arquivo>`
 - `echo <texto>`
 - `panic`
 - `panic int3`

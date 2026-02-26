@@ -8,6 +8,7 @@
 #include <kernel/panic.h>
 #include <kernel/klog.h>
 #include <kernel/shell.h>
+#include <kernel/ramfs.h>
 
 struct exception_info {
     const char *name;
@@ -90,6 +91,7 @@ void kernel_main(uint32_t mb_info_addr) {
    vmm_init();
    protect_kernel_ro_sections();
    kmalloc_init();
+   init_ramfs(0, 0);
 
    klog_info("interrupts configured");
    vga_puts("PMM free frames=");
@@ -98,7 +100,7 @@ void kernel_main(uint32_t mb_info_addr) {
    vga_puts(vmm_is_enabled() ? "ON" : "OFF");
    vga_puts(" WP=");
    vga_puts(vmm_wp_is_enabled() ? "ON" : "OFF");
-   vga_puts(" null-guard=ON\n");
+   vga_puts(" null-guard=ON ramfs=ON\n");
 
    asm volatile ("sti");
 
