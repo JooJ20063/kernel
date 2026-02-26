@@ -13,6 +13,9 @@ C_SRCS := \
 	kernel/vga.c \
 	kernel/vmm.c \
 	kernel/pmm.c \
+	kernel/kmalloc.c \
+	kernel/vfs.c \
+	kernel/ramfs.c \
 	kernel/sched.c \
 	kernel/klog.c \
 	kernel/panic.c \

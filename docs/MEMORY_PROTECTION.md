@@ -15,9 +15,10 @@ Este documento descreve o estado atual e próximos passos de endurecimento de me
 - Reserva da área de informações do Multiboot2.
 - **Null-page guard**: endereço `0x0` fica sem mapeamento virtual para capturar ponteiro nulo via `#PF`.
 - **CR0.WP habilitado**: ativa proteção de escrita em páginas marcadas read-only mesmo em Ring 0.
+- **`.text`/`.rodata` remapeadas como read-only** após `vmm_init`, usando `vmm_map_page`.
 
 ## Próximos passos recomendados
 
-1. Marcar páginas de `.text` como somente leitura (W=0).
+1. Expandir o VMM para além dos 16 MiB iniciais e suportar tabelas sob demanda.
 2. Separar espaço virtual de kernel e userland.
 3. Introduzir tabelas de páginas por processo e troca de contexto real.
