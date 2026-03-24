@@ -5,19 +5,20 @@
 #define PMM_MAX_FRAMES (PMM_MAX_MEMORY / PMM_FRAME_SIZE)
 
 static uint8_t frame_bitmap[PMM_MAX_FRAMES / 8];
+static uint8_t table_frame_bitmap[PMM_MAX_FRAMES / 8];
 static uint32_t total_frames;
 static uint32_t free_frames;
 
-static void set_bit(uint32_t frame) {
-    frame_bitmap[frame / 8] |= (uint8_t)(1U << (frame % 8));
+static void set_bit(uint8_t *bitmap, uint32_t frame) {
+    bitmap[frame / 8] |= (uint8_t)(1U << (frame % 8));
 }
 
-static void clear_bit(uint32_t frame) {
-    frame_bitmap[frame / 8] &= (uint8_t)~(1U << (frame % 8));
+static void clear_bit(uint8_t *bitmap, uint32_t frame) {
+    bitmap[frame / 8] &= (uint8_t)~(1U << (frame % 8));
 }
 
-static uint8_t test_bit(uint32_t frame) {
-    return (uint8_t)(frame_bitmap[frame / 8] & (1U << (frame % 8)));
+static uint8_t test_bit(const uint8_t *bitmap, uint32_t frame) {
+    return (uint8_t)(bitmap[frame / 8] & (1U << (frame % 8)));
 }
 
 static void pmm_mark_range(uintptr_t start, uintptr_t end, uint8_t used) {
@@ -35,16 +36,18 @@ static void pmm_mark_range(uintptr_t start, uintptr_t end, uint8_t used) {
         }
 
         if (used) {
-            if (!test_bit(frame)) {
-                set_bit(frame);
+            if (!test_bit(frame_bitmap, frame)) {
+                set_bit(frame_bitmap, frame);
                 free_frames--;
             }
         } else {
-            if (test_bit(frame)) {
-                clear_bit(frame);
+            if (test_bit(frame_bitmap, frame)) {
+                clear_bit(frame_bitmap, frame);
                 free_frames++;
             }
         }
+
+        clear_bit(table_frame_bitmap, frame);
     }
 }
 
@@ -58,6 +61,7 @@ void pmm_init(uint32_t memory_top_bytes) {
 
     for (uint32_t i = 0; i < sizeof(frame_bitmap); ++i) {
         frame_bitmap[i] = 0xFF;
+        table_frame_bitmap[i] = 0x00;
     }
 
     if (total_frames == 0) {
@@ -121,8 +125,9 @@ uint32_t pmm_alloc_frame(void) {
     }
 
     for (uint32_t frame = 0; frame < total_frames; ++frame) {
-        if (!test_bit(frame)) {
-            set_bit(frame);
+        if (!test_bit(frame_bitmap, frame)) {
+            set_bit(frame_bitmap, frame);
+            clear_bit(table_frame_bitmap, frame);
             free_frames--;
             return frame * PMM_FRAME_SIZE;
         }
@@ -138,10 +143,45 @@ void pmm_free_frame(uint32_t frame_addr) {
         return;
     }
 
-    if (test_bit(frame)) {
-        clear_bit(frame);
+    if (test_bit(frame_bitmap, frame)) {
+        clear_bit(frame_bitmap, frame);
+        clear_bit(table_frame_bitmap, frame);
         free_frames++;
     }
+}
+
+uint32_t pmm_alloc_table_frame(void) {
+    uint32_t frame_addr = pmm_alloc_frame();
+    uint32_t frame;
+
+    if (frame_addr == 0) {
+        return 0;
+    }
+
+    frame = frame_addr / PMM_FRAME_SIZE;
+    set_bit(table_frame_bitmap, frame);
+    return frame_addr;
+}
+
+void pmm_free_table_frame(uint32_t frame_addr) {
+    uint32_t frame = frame_addr / PMM_FRAME_SIZE;
+
+    if (frame >= total_frames) {
+        return;
+    }
+
+    clear_bit(table_frame_bitmap, frame);
+    pmm_free_frame(frame_addr);
+}
+
+uint8_t pmm_is_table_frame(uint32_t frame_addr) {
+    uint32_t frame = frame_addr / PMM_FRAME_SIZE;
+
+    if (frame >= total_frames) {
+        return 0;
+    }
+
+    return (uint8_t)(test_bit(table_frame_bitmap, frame) != 0U);
 }
 
 uint32_t pmm_free_frame_count(void) {

@@ -6,7 +6,13 @@
 
 void pmm_init(uint32_t memory_top_bytes);
 void pmm_init_from_multiboot(uint32_t mb_info_addr, uintptr_t kernel_start, uintptr_t kernel_end);
+
 uint32_t pmm_alloc_frame(void);
 void pmm_free_frame(uint32_t frame_addr);
+
+uint32_t pmm_alloc_table_frame(void);
+void pmm_free_table_frame(uint32_t frame_addr);
+uint8_t pmm_is_table_frame(uint32_t frame_addr);
+
 uint32_t pmm_free_frame_count(void);
 uint32_t pmm_total_frame_count(void);

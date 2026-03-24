@@ -103,6 +103,51 @@ static uint32_t parse_u32(const char *s, int *ok) {
     return v;
 }
 
+static int is_space(char c) {
+    return (c == ' ' || c == '\t');
+}
+
+static const char *skip_spaces(const char *s) {
+    while (*s && is_space(*s)) {
+        s++;
+    }
+    return s;
+}
+
+static uint32_t parse_hex_u32(const char *s, int *ok) {
+    uint32_t v = 0;
+    *ok = 0;
+
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        s += 2;
+    }
+
+    if (*s == 0) {
+        return 0;
+    }
+
+    while (*s) {
+        char c = *s;
+        uint32_t d;
+
+        if (c >= '0' && c <= '9') {
+            d = (uint32_t)(c - '0');
+        } else if (c >= 'a' && c <= 'f') {
+            d = 10U + (uint32_t)(c - 'a');
+        } else if (c >= 'A' && c <= 'F') {
+            d = 10U + (uint32_t)(c - 'A');
+        } else {
+            return 0;
+        }
+
+        v = (v << 4) | d;
+        s++;
+    }
+
+    *ok = 1;
+    return v;
+}
+
 static void shell_prompt(void) {
     vga_set_color(0x0B, 0x00);
     vga_puts("\n$ ");
@@ -265,11 +310,92 @@ static void shell_cmd_touch(const char *name) {
     vga_puts("\n");
 }
 
+static void shell_cmd_virt(const char *arg) {
+    int ok;
+    uintptr_t virt;
+    uintptr_t phys;
+
+    if (arg == 0 || *arg == 0) {
+        klog_warn("usage: virt <hexaddr>");
+        return;
+    }
+
+    virt = (uintptr_t)parse_hex_u32(arg, &ok);
+    if (!ok) {
+        klog_warn("endereco invalido");
+        return;
+    }
+
+    phys = vmm_translate(virt);
+
+    vga_puts("virt=");
+    vga_puthex((uint32_t)virt);
+    vga_puts(" phys=");
+    if (phys == 0U) {
+        vga_puts("UNMAPPED");
+    } else {
+        vga_puthex((uint32_t)phys);
+    }
+    vga_puts("\n");
+}
+
+static void shell_cmd_mapped(const char *arg) {
+    int ok;
+    uintptr_t virt;
+
+    if (arg == 0 || *arg == 0) {
+        klog_warn("usage: mapped <hexaddr>");
+        return;
+    }
+
+    virt = (uintptr_t)parse_hex_u32(arg, &ok);
+    if (!ok) {
+        klog_warn("endereco invalido");
+        return;
+    }
+
+    vga_puts("virt=");
+    vga_puthex((uint32_t)virt);
+    vga_puts(" mapped=");
+    vga_puts(vmm_is_mapped(virt) ? "YES" : "NO");
+    vga_puts("\n");
+}
+
+static void shell_cmd_unmap(const char *arg) {
+    int ok;
+    uintptr_t virt;
+    uintptr_t page;
+    int rc;
+
+    if (arg == 0 || *arg == 0) {
+        klog_warn("usage: unmap <hexaddr>");
+        return;
+    }
+
+    virt = (uintptr_t)parse_hex_u32(arg, &ok);
+    if (!ok) {
+        klog_warn("endereco invalido");
+        return;
+    }
+
+    page = virt & 0xFFFFF000U;
+    rc = vmm_unmap_page(page);
+    if (rc != 0) {
+        klog_warn("unmap falhou");
+        return;
+    }
+
+    vga_puts("unmapped ");
+    vga_puthex((uint32_t)page);
+    vga_puts("\n");
+}
+
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task pmm vmm wp nullguard kmalloc kheap ls cat touch echo panic\n");
+        vga_puts("cmds: help clear ticks task pmm vmm wp nullguard kmalloc kheap ls cat touch echo panic virt mapped unmap\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0 | panic null | panic int <n>\n");
+        vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
     } else if (str_eq(cmd, "clear")) {
         vga_clear();
     } else if (str_eq(cmd, "ticks")) {
@@ -375,6 +501,12 @@ static void shell_run_command(const char *cmd) {
             vga_puts(cmd + 5);
             vga_puts("\n");
         }
+    } else if (str_starts(cmd, "virt ")) {
+        shell_cmd_virt(skip_spaces(cmd + 5));
+    } else if (str_starts(cmd, "mapped ")) {
+        shell_cmd_mapped(skip_spaces(cmd + 7));
+    } else if (str_starts(cmd, "unmap ")) {
+        shell_cmd_unmap(skip_spaces(cmd + 6));
     } else if (str_eq(cmd, "panic") || str_starts(cmd, "panic ")) {
         shell_cmd_panic(cmd[5] ? cmd + 6 : 0);
     } else if (cmd[0] != 0) {

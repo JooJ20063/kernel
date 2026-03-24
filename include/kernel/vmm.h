@@ -3,9 +3,14 @@
 #include <stdint.h>
 
 #define VMM_PAGE_PRESENT 0x001U
-#define VMM_PAGE_RW      0x002U
+#define VMM_PAGE_RW	 0X002U
 
 void vmm_init(void);
 uint8_t vmm_is_enabled(void);
 uint8_t vmm_wp_is_enabled(void);
+
 int vmm_map_page(uintptr_t virt_addr, uintptr_t phys_addr, uint32_t flags);
+int vmm_unmap_page(uintptr_t virt_addr);
+uint8_t vmm_is_mapped(uintptr_t virt_addr);
+uintptr_t vmm_translate(uintptr_t virt_addr);
+
