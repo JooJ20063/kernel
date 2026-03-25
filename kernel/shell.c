@@ -671,9 +671,16 @@ static void shell_run_command(const char *cmd) {
         shell_cmd_unmap(skip_spaces(cmd + 6));
     } else if (str_eq(cmd, "panic") || str_starts(cmd, "panic ")) {
         shell_cmd_panic(cmd[5] ? cmd + 6 : 0);
-    } else if (cmd[0] != 0) {
+    } 
+      else if (str_eq(cmd, "kheapcheck")) {
+    vga_puts("kheapcheck=");
+    vga_puts(kheap_check() ? "OK" : "CORRUPT");
+    vga_puts("\n"); 
+    }
+      else if (cmd[0] != 0) {
         klog_warn("unknown command");
     }
+
 }
 
 void shell_init(void) {

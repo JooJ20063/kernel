@@ -1,14 +1,15 @@
 #include <kernel/kmalloc.h>
 #include <kernel/pmm.h>
 #include <kernel/vmm.h>
+#include <kernel/klog.h>
 
-#define KMALLOC_ALIGN       16U
-#define KMALLOC_PAGE_SIZE   4096U
-#define KMALLOC_HEAP_START  0x00C00000U
-#define KMALLOC_HEAP_END    0x01000000U
-#define KMALLOC_MIN_SPLIT   32U
+#define KMALLOC_ALIGN        16U
+#define KMALLOC_PAGE_SIZE    4096U
+#define KMALLOC_HEAP_START   0x00C00000U
+#define KMALLOC_HEAP_END     0x01000000U
+#define KMALLOC_MIN_SPLIT    32U
 
-#define KMALLOC_MAGIC       0x4B484541U /* "KHEA" */
+#define KMALLOC_MAGIC        0x4B484541U
 #define KMALLOC_POISON_ALLOC 0xCDU
 #define KMALLOC_POISON_FREE  0xDDU
 
@@ -37,15 +38,11 @@ static uint32_t block_overhead(void) {
 }
 
 static void mem_copy(uint8_t *dst, const uint8_t *src, uint32_t size) {
-    for (uint32_t i = 0; i < size; ++i) {
-        dst[i] = src[i];
-    }
+    for (uint32_t i = 0; i < size; ++i) dst[i] = src[i];
 }
 
 static void mem_fill(uint8_t *dst, uint8_t value, uint32_t size) {
-    for (uint32_t i = 0; i < size; ++i) {
-        dst[i] = value;
-    }
+    for (uint32_t i = 0; i < size; ++i) dst[i] = value;
 }
 
 static void mem_zero(uint8_t *dst, uint32_t size) {
@@ -56,9 +53,7 @@ static void block_init(kmalloc_block_t *blk, uint32_t size, uint8_t free) {
     blk->magic = KMALLOC_MAGIC;
     blk->size = size;
     blk->free = free;
-    blk->_pad[0] = 0;
-    blk->_pad[1] = 0;
-    blk->_pad[2] = 0;
+    blk->_pad[0] = blk->_pad[1] = blk->_pad[2] = 0;
     blk->next = 0;
     blk->prev = 0;
 }
@@ -66,27 +61,14 @@ static void block_init(kmalloc_block_t *blk, uint32_t size, uint8_t free) {
 static uint8_t block_is_valid(const kmalloc_block_t *blk) {
     uintptr_t addr;
 
-    if (blk == 0) {
-        return 0;
-    }
+    if (!blk) return 0;
 
     addr = (uintptr_t)blk;
 
-    if (addr < KMALLOC_HEAP_START || addr + block_overhead() > heap_limit) {
-        return 0;
-    }
-
-    if (blk->magic != KMALLOC_MAGIC) {
-        return 0;
-    }
-
-    if ((uintptr_t)addr + (uintptr_t)block_overhead() + (uintptr_t)blk->size > heap_limit) {
-        return 0;
-    }
-
-    if (!(blk->free == 0 || blk->free == 1)) {
-        return 0;
-    }
+    if (addr < KMALLOC_HEAP_START || addr + block_overhead() > heap_limit) return 0;
+    if (blk->magic != KMALLOC_MAGIC) return 0;
+    if (addr + block_overhead() + blk->size > heap_limit) return 0;
+    if (!(blk->free == 0 || blk->free == 1)) return 0;
 
     return 1;
 }
@@ -96,24 +78,16 @@ static void *block_payload(kmalloc_block_t *blk) {
 }
 
 static kmalloc_block_t *payload_to_block(void *ptr) {
-    if (ptr == 0) {
-        return 0;
-    }
-
-    return (kmalloc_block_t *)((uintptr_t)ptr - (uintptr_t)block_overhead());
+    if (!ptr) return 0;
+    return (kmalloc_block_t *)((uintptr_t)ptr - block_overhead());
 }
 
 static kmalloc_block_t *find_last_block(void) {
     kmalloc_block_t *cur = heap_head;
+    if (!cur) return 0;
 
-    if (cur == 0) {
-        return 0;
-    }
-
-    while (cur->next != 0) {
-        if (!block_is_valid(cur)) {
-            return 0;
-        }
+    while (cur->next) {
+        if (!block_is_valid(cur)) return 0;
         cur = cur->next;
     }
 
@@ -123,15 +97,9 @@ static kmalloc_block_t *find_last_block(void) {
 static kmalloc_block_t *find_first_fit(uint32_t size) {
     kmalloc_block_t *cur = heap_head;
 
-    while (cur != 0) {
-        if (!block_is_valid(cur)) {
-            return 0;
-        }
-
-        if (cur->free && cur->size >= size) {
-            return cur;
-        }
-
+    while (cur) {
+        if (!block_is_valid(cur)) return 0;
+        if (cur->free && cur->size >= size) return cur;
         cur = cur->next;
     }
 
@@ -139,30 +107,20 @@ static kmalloc_block_t *find_first_fit(uint32_t size) {
 }
 
 static void split_block(kmalloc_block_t *blk, uint32_t wanted_size) {
-    kmalloc_block_t *new_blk;
-    uintptr_t new_addr;
-    uint32_t remain;
+    if (!blk || !block_is_valid(blk) || blk->size < wanted_size) return;
 
-    if (blk == 0 || !block_is_valid(blk) || blk->size < wanted_size) {
-        return;
-    }
+    uint32_t remain = blk->size - wanted_size;
+    if (remain <= block_overhead() + KMALLOC_MIN_SPLIT) return;
 
-    remain = blk->size - wanted_size;
-    if (remain <= block_overhead() + KMALLOC_MIN_SPLIT) {
-        return;
-    }
-
-    new_addr = (uintptr_t)block_payload(blk) + (uintptr_t)wanted_size;
-    new_blk = (kmalloc_block_t *)new_addr;
+    uintptr_t new_addr = (uintptr_t)block_payload(blk) + wanted_size;
+    kmalloc_block_t *new_blk = (kmalloc_block_t *)new_addr;
 
     block_init(new_blk, remain - block_overhead(), 1);
 
     new_blk->next = blk->next;
     new_blk->prev = blk;
 
-    if (blk->next != 0) {
-        blk->next->prev = new_blk;
-    }
+    if (blk->next) blk->next->prev = new_blk;
 
     blk->next = new_blk;
     blk->size = wanted_size;
@@ -171,49 +129,26 @@ static void split_block(kmalloc_block_t *blk, uint32_t wanted_size) {
 }
 
 static void coalesce_forward(kmalloc_block_t *blk) {
-    kmalloc_block_t *next;
+    while (blk && blk->next && blk->next->free) {
+        kmalloc_block_t *next = blk->next;
 
-    if (blk == 0 || !block_is_valid(blk)) {
-        return;
-    }
-
-    next = blk->next;
-    while (next != 0) {
-        if (!block_is_valid(next)) {
-            return;
-        }
-
-        if (!next->free) {
-            return;
-        }
+        if (!block_is_valid(next)) return;
 
         blk->size += block_overhead() + next->size;
         blk->next = next->next;
 
-        if (next->next != 0) {
-            next->next->prev = blk;
-        }
-
-        next = blk->next;
+        if (next->next) next->next->prev = blk;
     }
 }
 
 static kmalloc_block_t *coalesce_around(kmalloc_block_t *blk) {
-    if (blk == 0 || !block_is_valid(blk)) {
-        return 0;
-    }
+    if (!blk || !block_is_valid(blk)) return 0;
 
     coalesce_forward(blk);
 
-    if (blk->prev != 0) {
-        if (!block_is_valid(blk->prev)) {
-            return 0;
-        }
-
-        if (blk->prev->free) {
-            blk = blk->prev;
-            coalesce_forward(blk);
-        }
+    if (blk->prev && blk->prev->free) {
+        blk = blk->prev;
+        coalesce_forward(blk);
     }
 
     return blk;
@@ -221,17 +156,13 @@ static kmalloc_block_t *coalesce_around(kmalloc_block_t *blk) {
 
 static int map_heap_pages(uint32_t bytes_needed) {
     uintptr_t new_limit = heap_limit;
-    uintptr_t end_needed = heap_limit + (uintptr_t)bytes_needed;
+    uintptr_t end_needed = heap_limit + bytes_needed;
 
-    if (end_needed > KMALLOC_HEAP_END) {
-        return -1;
-    }
+    if (end_needed > KMALLOC_HEAP_END) return -1;
 
     while (new_limit < end_needed) {
         uint32_t frame = pmm_alloc_frame();
-        if (frame == 0U) {
-            return -1;
-        }
+        if (!frame) return -1;
 
         if (vmm_map_page(new_limit, frame, VMM_PAGE_RW) != 0) {
             pmm_free_frame(frame);
@@ -247,44 +178,33 @@ static int map_heap_pages(uint32_t bytes_needed) {
 }
 
 static kmalloc_block_t *grow_heap(uint32_t wanted_size) {
-    kmalloc_block_t *last;
-    kmalloc_block_t *new_blk;
-    uint32_t total_needed = block_overhead() + wanted_size;
-    uintptr_t region_start;
+    kmalloc_block_t *last = find_last_block();
 
-    last = find_last_block();
-
-    if (last != 0 && last->free) {
-        uint32_t missing = 0;
-
+    if (last && last->free) {
         if (last->size < wanted_size) {
-            missing = wanted_size - last->size;
-        }
-
-        if (missing > 0) {
+            uint32_t missing = wanted_size - last->size;
             uint32_t bytes = align_up(missing, KMALLOC_PAGE_SIZE);
-            if (map_heap_pages(bytes) != 0) {
-                return 0;
-            }
+            uint32_t old_size = last->size;
+
+            if (map_heap_pages(bytes) != 0) return 0;
 
             last->size += bytes;
-            mem_fill((uint8_t *)block_payload(last) + (last->size - bytes), KMALLOC_POISON_FREE, bytes);
+            mem_fill((uint8_t *)block_payload(last) + old_size, KMALLOC_POISON_FREE, bytes);
         }
-
         return last;
     }
 
-    region_start = heap_limit;
+    uintptr_t region_start = heap_limit;
 
-    if (map_heap_pages(align_up(total_needed, KMALLOC_PAGE_SIZE)) != 0) {
+    if (map_heap_pages(align_up(block_overhead() + wanted_size, KMALLOC_PAGE_SIZE)) != 0)
         return 0;
-    }
 
-    new_blk = (kmalloc_block_t *)region_start;
-    block_init(new_blk, (uint32_t)(heap_limit - region_start) - block_overhead(), 1);
+    kmalloc_block_t *new_blk = (kmalloc_block_t *)region_start;
+
+    block_init(new_blk, (heap_limit - region_start) - block_overhead(), 1);
     mem_fill((uint8_t *)block_payload(new_blk), KMALLOC_POISON_FREE, new_blk->size);
 
-    if (last == 0) {
+    if (!heap_head) {
         heap_head = new_blk;
     } else {
         last->next = new_blk;
@@ -300,188 +220,108 @@ void kmalloc_init(void) {
 }
 
 void *kmalloc(uint32_t size) {
-    kmalloc_block_t *blk;
-    uint32_t aligned_size;
+    if (!size) return 0;
 
-    if (size == 0) {
-        return 0;
+    uint32_t aligned = align_up(size, KMALLOC_ALIGN);
+    kmalloc_block_t *blk = find_first_fit(aligned);
+
+    if (!blk) {
+        blk = grow_heap(aligned);
+        if (!blk) return 0;
     }
 
-    aligned_size = align_up(size, KMALLOC_ALIGN);
-
-    blk = find_first_fit(aligned_size);
-    if (blk == 0) {
-        blk = grow_heap(aligned_size);
-        if (blk == 0) {
-            return 0;
-        }
-    }
-
-    if (!block_is_valid(blk)) {
-        return 0;
-    }
-
-    split_block(blk, aligned_size);
+    split_block(blk, aligned);
     blk->free = 0;
+
     mem_fill((uint8_t *)block_payload(blk), KMALLOC_POISON_ALLOC, blk->size);
 
     return block_payload(blk);
 }
 
 void kfree(void *ptr) {
-    kmalloc_block_t *blk;
+    if (!ptr) return;
 
-    if (ptr == 0) {
-        return;
-    }
+    kmalloc_block_t *blk = payload_to_block(ptr);
 
-    if ((uintptr_t)ptr < KMALLOC_HEAP_START || (uintptr_t)ptr >= heap_limit) {
-        return;
-    }
-
-    blk = payload_to_block(ptr);
-    if (!block_is_valid(blk)) {
-        return;
-    }
+    if (!block_is_valid(blk)) return;
 
     if (blk->free) {
+        klog_warn("double free detected");
         return;
     }
 
     blk->free = 1;
     mem_fill((uint8_t *)block_payload(blk), KMALLOC_POISON_FREE, blk->size);
-    (void)coalesce_around(blk);
+
+    coalesce_around(blk);
 }
 
-void *krealloc(void *ptr, uint32_t new_size) {
-    kmalloc_block_t *blk;
-    void *new_ptr;
-    uint32_t aligned_size;
-    uint32_t copy_size;
+void *krealloc(void *ptr, uint32_t size) {
+    if (!ptr) return kmalloc(size);
+    if (!size) { kfree(ptr); return 0; }
 
-    if (ptr == 0) {
-        return kmalloc(new_size);
-    }
+    kmalloc_block_t *blk = payload_to_block(ptr);
 
-    if (new_size == 0) {
-        kfree(ptr);
-        return 0;
-    }
+    if (!block_is_valid(blk) || blk->free) return 0;
 
-    blk = payload_to_block(ptr);
-    if (!block_is_valid(blk) || blk->free) {
-        return 0;
-    }
+    uint32_t aligned = align_up(size, KMALLOC_ALIGN);
 
-    aligned_size = align_up(new_size, KMALLOC_ALIGN);
-
-    if (blk->size >= aligned_size) {
-        split_block(blk, aligned_size);
+    if (blk->size >= aligned) {
+        split_block(blk, aligned);
         return ptr;
     }
 
-    if (blk->next != 0 && block_is_valid(blk->next) && blk->next->free &&
-        (blk->size + block_overhead() + blk->next->size) >= aligned_size) {
+    if (blk->next && blk->next->free &&
+        (blk->size + block_overhead() + blk->next->size) >= aligned) {
         coalesce_forward(blk);
-        split_block(blk, aligned_size);
-        blk->free = 0;
+        split_block(blk, aligned);
         return ptr;
     }
 
-    new_ptr = kmalloc(aligned_size);
-    if (new_ptr == 0) {
-        return 0;
-    }
+    void *new_ptr = kmalloc(aligned);
+    if (!new_ptr) return 0;
 
-    copy_size = blk->size;
-    if (copy_size > aligned_size) {
-        copy_size = aligned_size;
-    }
+    uint32_t copy = blk->size < aligned ? blk->size : aligned;
+    mem_copy(new_ptr, ptr, copy);
 
-    mem_copy((uint8_t *)new_ptr, (const uint8_t *)ptr, copy_size);
     kfree(ptr);
     return new_ptr;
 }
 
 uint32_t kmalloc_bytes_used(void) {
-    kmalloc_block_t *cur = heap_head;
     uint32_t total = 0;
-
-    while (cur != 0) {
-        if (!block_is_valid(cur)) {
-            return total;
-        }
-
-        if (!cur->free) {
-            total += cur->size;
-        }
-
-        cur = cur->next;
-    }
-
+    for (kmalloc_block_t *cur = heap_head; cur; cur = cur->next)
+        if (!cur->free) total += cur->size;
     return total;
 }
 
 uint32_t kmalloc_bytes_free(void) {
-    kmalloc_block_t *cur = heap_head;
     uint32_t total = 0;
-
-    while (cur != 0) {
-        if (!block_is_valid(cur)) {
-            return total;
-        }
-
-        if (cur->free) {
-            total += cur->size;
-        }
-
-        cur = cur->next;
-    }
-
+    for (kmalloc_block_t *cur = heap_head; cur; cur = cur->next)
+        if (cur->free) total += cur->size;
     return total;
 }
 
 uint32_t kmalloc_bytes_mapped(void) {
-    return (uint32_t)(heap_limit - KMALLOC_HEAP_START);
+    return heap_limit - KMALLOC_HEAP_START;
 }
 
 uint32_t kmalloc_block_count(void) {
-    kmalloc_block_t *cur = heap_head;
     uint32_t count = 0;
-
-    while (cur != 0) {
-        if (!block_is_valid(cur)) {
-            return count;
-        }
-
+    for (kmalloc_block_t *cur = heap_head; cur; cur = cur->next)
         count++;
-        cur = cur->next;
-    }
-
     return count;
 }
 
 uint8_t kheap_check(void) {
-    kmalloc_block_t *cur = heap_head;
     kmalloc_block_t *prev = 0;
 
-    while (cur != 0) {
-        if (!block_is_valid(cur)) {
-            return 0;
-        }
-
-        if (cur->prev != prev) {
-            return 0;
-        }
-
-        if (cur->next != 0) {
-            if ((uintptr_t)cur->next <= (uintptr_t)cur) {
-                return 0;
-            }
-        }
+    for (kmalloc_block_t *cur = heap_head; cur; cur = cur->next) {
+        if (!block_is_valid(cur)) return 0;
+        if (cur->prev != prev) return 0;
+        if (cur->next && (uintptr_t)cur->next <= (uintptr_t)cur) return 0;
 
         prev = cur;
-        cur = cur->next;
     }
 
     return 1;
