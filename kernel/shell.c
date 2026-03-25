@@ -12,9 +12,12 @@
 #include <arch/x86/regs.h>
 
 #define SHELL_BUF 128
+#define KHEAP_SLOTS 16
 
 static char line[SHELL_BUF];
 static uint32_t line_len;
+static void *heap_slots[KHEAP_SLOTS];
+static uint32_t heap_slot_sizes[KHEAP_SLOTS];
 
 static int str_eq(const char *a, const char *b) {
     while (*a && *b) {
@@ -152,6 +155,19 @@ static void shell_prompt(void) {
     vga_set_color(0x0B, 0x00);
     vga_puts("\n$ ");
     vga_set_color(0x0F, 0x00);
+}
+
+static int heap_find_free_slot(void) {
+    for (int i = 0; i < KHEAP_SLOTS; ++i) {
+        if (heap_slots[i] == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int heap_slot_valid(uint32_t slot) {
+    return (slot < KHEAP_SLOTS && heap_slots[slot] != 0);
 }
 
 static void shell_cmd_panic(const char *arg) {
@@ -390,12 +406,172 @@ static void shell_cmd_unmap(const char *arg) {
     vga_puts("\n");
 }
 
+static void shell_cmd_kslots(void) {
+    int found = 0;
+
+    for (uint32_t i = 0; i < KHEAP_SLOTS; ++i) {
+        if (heap_slots[i] != 0) {
+            found = 1;
+            vga_puts("slot=");
+            vga_putdec(i);
+            vga_puts(" ptr=");
+            vga_puthex((uint32_t)(uintptr_t)heap_slots[i]);
+            vga_puts(" size=");
+            vga_putdec(heap_slot_sizes[i]);
+            vga_puts("\n");
+        }
+    }
+
+    if (!found) {
+        vga_puts("(sem slots ocupados)\n");
+    }
+}
+
+static void shell_cmd_kmalloc_slot(const char *arg) {
+    int ok;
+    uint32_t sz;
+    int slot;
+    uint32_t *ptr;
+
+    if (arg == 0 || *arg == 0) {
+        klog_warn("usage: kmalloc <bytes>");
+        return;
+    }
+
+    sz = parse_u32(arg, &ok);
+    if (!ok || sz == 0) {
+        klog_warn("usage: kmalloc <bytes>");
+        return;
+    }
+
+    slot = heap_find_free_slot();
+    if (slot < 0) {
+        klog_warn("sem slots livres");
+        return;
+    }
+
+    ptr = (uint32_t *)kmalloc(sz);
+    if (ptr == 0) {
+        klog_warn("kmalloc failed");
+        return;
+    }
+
+    *ptr = 0xCAFEBABEU;
+    heap_slots[slot] = ptr;
+    heap_slot_sizes[slot] = sz;
+
+    vga_puts("kmalloc slot=");
+    vga_putdec((uint32_t)slot);
+    vga_puts(" ptr=");
+    vga_puthex((uint32_t)(uintptr_t)ptr);
+    vga_puts(" size=");
+    vga_putdec(sz);
+    vga_puts(" test=");
+    vga_puthex(*ptr);
+    vga_puts("\n");
+}
+
+static void shell_cmd_kfree_slot(const char *arg) {
+    int ok;
+    uint32_t slot;
+
+    if (arg == 0 || *arg == 0) {
+        klog_warn("usage: kfree <slot>");
+        return;
+    }
+
+    slot = parse_u32(arg, &ok);
+    if (!ok || slot >= KHEAP_SLOTS) {
+        klog_warn("slot invalido");
+        return;
+    }
+
+    if (!heap_slot_valid(slot)) {
+        klog_warn("slot vazio");
+        return;
+    }
+
+    kfree(heap_slots[slot]);
+    heap_slots[slot] = 0;
+    heap_slot_sizes[slot] = 0;
+
+    vga_puts("kfree slot=");
+    vga_putdec(slot);
+    vga_puts("\n");
+}
+
+static void shell_cmd_krealloc_slot(const char *arg) {
+    int ok_slot;
+    int ok_size;
+    uint32_t slot;
+    uint32_t new_size;
+    uint32_t i = 0;
+    uint32_t first_end;
+    void *new_ptr;
+
+    if (arg == 0 || *arg == 0) {
+        klog_warn("usage: krealloc <slot> <bytes>");
+        return;
+    }
+
+    while (arg[i] != 0 && arg[i] != ' ') {
+        i++;
+    }
+
+    first_end = i;
+
+    if (arg[i] == 0) {
+        klog_warn("usage: krealloc <slot> <bytes>");
+        return;
+    }
+
+    {
+        char slot_buf[16];
+        str_copy_range(slot_buf, sizeof(slot_buf), arg, 0, first_end);
+        slot = parse_u32(slot_buf, &ok_slot);
+    }
+
+    while (arg[i] == ' ') {
+        i++;
+    }
+
+    new_size = parse_u32(arg + i, &ok_size);
+
+    if (!ok_slot || !ok_size || slot >= KHEAP_SLOTS || new_size == 0) {
+        klog_warn("usage: krealloc <slot> <bytes>");
+        return;
+    }
+
+    if (!heap_slot_valid(slot)) {
+        klog_warn("slot vazio");
+        return;
+    }
+
+    new_ptr = krealloc(heap_slots[slot], new_size);
+    if (new_ptr == 0) {
+        klog_warn("krealloc failed");
+        return;
+    }
+
+    heap_slots[slot] = new_ptr;
+    heap_slot_sizes[slot] = new_size;
+
+    vga_puts("krealloc slot=");
+    vga_putdec(slot);
+    vga_puts(" ptr=");
+    vga_puthex((uint32_t)(uintptr_t)new_ptr);
+    vga_puts(" size=");
+    vga_putdec(new_size);
+    vga_puts("\n");
+}
+
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task pmm vmm wp nullguard kmalloc kheap ls cat touch echo panic virt mapped unmap\n");
+        vga_puts("cmds: help clear ticks task pmm vmm wp nullguard kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic virt mapped unmap\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0 | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
+        vga_puts("heap dbg: kmalloc <bytes> | kfree <slot> | krealloc <slot> <bytes> | kslots | kheapcheck\n");
     } else if (str_eq(cmd, "clear")) {
         vga_clear();
     } else if (str_eq(cmd, "ticks")) {
@@ -433,35 +609,21 @@ static void shell_run_command(const char *cmd) {
     } else if (str_eq(cmd, "kheap")) {
         vga_puts("kheap used=");
         vga_putdec(kmalloc_bytes_used());
+        vga_puts(" free=");
+        vga_putdec(kmalloc_bytes_free());
         vga_puts(" mapped=");
         vga_putdec(kmalloc_bytes_mapped());
+        vga_puts(" blocks=");
+        vga_putdec(kmalloc_block_count());
         vga_puts("\n");
+    } else if (str_eq(cmd, "kslots")) {
+        shell_cmd_kslots();
     } else if (str_starts(cmd, "kmalloc ")) {
-        int ok;
-        uint32_t sz = parse_u32(cmd + 8, &ok);
-
-        if (!ok || sz == 0) {
-            klog_warn("usage: kmalloc <bytes>");
-            return;
-        }
-
-        {
-            uint32_t *ptr = (uint32_t *)kmalloc(sz);
-            if (ptr == 0) {
-                klog_warn("kmalloc failed");
-                return;
-            }
-
-            *ptr = 0xCAFEBABEU;
-
-            vga_puts("kmalloc ok ptr=");
-            vga_puthex((uint32_t)(uintptr_t)ptr);
-            vga_puts(" test=");
-            vga_puthex(*ptr);
-            vga_puts(" used=");
-            vga_putdec(kmalloc_bytes_used());
-            vga_puts("\n");
-        }
+        shell_cmd_kmalloc_slot(skip_spaces(cmd + 8));
+    } else if (str_starts(cmd, "kfree ")) {
+        shell_cmd_kfree_slot(skip_spaces(cmd + 6));
+    } else if (str_starts(cmd, "krealloc ")) {
+        shell_cmd_krealloc_slot(skip_spaces(cmd + 9));
     } else if (str_eq(cmd, "ls")) {
         shell_cmd_ls();
     } else if (str_starts(cmd, "touch ")) {
@@ -516,6 +678,12 @@ static void shell_run_command(const char *cmd) {
 
 void shell_init(void) {
     line_len = 0;
+
+    for (uint32_t i = 0; i < KHEAP_SLOTS; ++i) {
+        heap_slots[i] = 0;
+        heap_slot_sizes[i] = 0;
+    }
+
     klog_info("shell ready (type 'help')");
     shell_prompt();
 }
