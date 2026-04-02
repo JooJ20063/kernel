@@ -9,6 +9,7 @@
 #include <kernel/klog.h>
 #include <kernel/shell.h>
 #include <kernel/ramfs.h>
+#include <kernel/syscall.h>
 
 struct exception_info {
     const char *name;
@@ -59,7 +60,43 @@ static void protect_kernel_ro_sections(void) {
     }
 }
 
+static void syscall_handler(registers_t *r) {
+    uint32_t syscall_num = r->eax;
+
+    switch (syscall_num) {
+        case SYS_WRITE: { // write
+            int fd = r->ebx;
+            const char *buf = (const char *)r->ecx;
+            uint32_t len = r->edx;
+            if (fd == 1) { // stdout
+                for (uint32_t i = 0; i < len; i++) {
+                    vga_putc(buf[i]);
+                }
+            }
+            r->eax = len; // return written bytes
+            break;
+        }
+        case SYS_EXIT: { // exit
+            vga_puts("Exiting via syscall...\n");
+            asm volatile ("outw %0, %1" : : "a"((uint16_t)0x2000), "Nd"((uint16_t)0x604));
+            asm volatile ("cli");
+            for (;;) {
+                asm volatile ("hlt");
+            }
+            break;
+        }
+        default:
+            r->eax = -1; // error
+            break;
+    }
+}
+
 void isr_handler_c(registers_t *r){
+    if (r->int_no == 128) {
+        syscall_handler(r);
+        return;
+    }
+
     const char *reason = "Unhandled exception";
 
     if (r->int_no < 32) {

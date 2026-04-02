@@ -39,12 +39,24 @@ ISO_DIR := iso
 ISO_BOOT := $(ISO_DIR)/boot
 ISO_GRUB := $(ISO_BOOT)/grub
 
-.PHONY: all iso run clean check
+CFLAGS64 := -m64 -ffreestanding -Iinclude -Wall -Wextra -Werror
+ASFLAGS64 := --64
+LDFLAGS64 := -m elf_x86_64 -T linker64.ld
+
+.PHONY: all kernel64 iso iso64 run run64 clean check
 
 all: kernel.bin
 
 kernel.bin: $(OBJS)
 	$(LD) $(LDFLAGS) -o $@ $(OBJS)
+
+kernel64.bin:
+	@mkdir -p $(BUILD_DIR)/kernel $(BUILD_DIR)/boot $(BUILD_DIR)/arch/x86
+	$(CC) $(CFLAGS64) -c kernel/kernel64.c -o build/kernel/kernel64.o
+	$(CC) $(CFLAGS64) -c arch/x86/idt64.c -o build/arch/x86/idt64.o
+	$(AS) $(ASFLAGS64) boot/gdt64.s -o build/boot/gdt64.o
+	$(AS) $(ASFLAGS64) boot/boot64.s -o build/boot/boot64.o
+	$(LD) $(LDFLAGS64) -o kernel64.bin build/kernel/kernel64.o build/arch/x86/idt64.o build/boot/gdt64.o build/boot/boot64.o
 
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -53,6 +65,10 @@ $(BUILD_DIR)/%.o: %.c
 $(BUILD_DIR)/%.o: %.s
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) $< -o $@
+
+$(BUILD_DIR)/boot/boot64.o: boot/boot64.s
+	@mkdir -p $(dir $@)
+	$(AS) --64 $< -o $@
 
 check:
 	$(CC) $(CFLAGS) -c $(C_SRCS)
@@ -64,8 +80,17 @@ iso: kernel.bin grub.cfg
 	cp grub.cfg $(ISO_GRUB)/grub.cfg
 	grub-mkrescue -o kernel.iso $(ISO_DIR)
 
+iso64: kernel64.bin grub.cfg
+	mkdir -p $(ISO_GRUB)
+	cp kernel64.bin $(ISO_BOOT)/kernel.bin
+	cp grub.cfg $(ISO_GRUB)/grub.cfg
+	grub-mkrescue -o kernel.iso $(ISO_DIR)
+
 run: iso
 	qemu-system-i386 -cdrom kernel.iso -boot d
+
+run64: iso64
+	qemu-system-x86_64 -cdrom kernel.iso -boot d
 
 clean:
 	rm -f kernel.bin kernel.iso

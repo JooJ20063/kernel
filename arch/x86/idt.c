@@ -63,6 +63,8 @@ extern void isr29();
 extern void isr30();
 extern void isr31();
 
+extern void isr128();
+
 void idt_install_isrs(void) {
     idt_set_gate(0, (uint32_t)isr0);
     idt_set_gate(1, (uint32_t)isr1);
@@ -96,6 +98,7 @@ void idt_install_isrs(void) {
     idt_set_gate(29, (uint32_t)isr29);
     idt_set_gate(30, (uint32_t)isr30);
     idt_set_gate(31, (uint32_t)isr31);
+    idt_set_gate(128, (uint32_t)isr128);
 }
 
 extern void irq0();

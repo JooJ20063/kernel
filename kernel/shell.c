@@ -567,11 +567,17 @@ static void shell_cmd_krealloc_slot(const char *arg) {
 
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task pmm vmm wp nullguard kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic virt mapped unmap\n");
+        vga_puts("cmds: help clear ticks task pmm vmm wp nullguard kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic shutdown arch virt mapped unmap\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0 | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
         vga_puts("heap dbg: kmalloc <bytes> | kfree <slot> | krealloc <slot> <bytes> | kslots | kheapcheck\n");
+    } else if (str_eq(cmd, "arch")) {
+        if (sizeof(void*) == 8) {
+            vga_puts("architecture: x86_64\n");
+        } else {
+            vga_puts("architecture: x86_32\n");
+        }
     } else if (str_eq(cmd, "clear")) {
         vga_clear();
     } else if (str_eq(cmd, "ticks")) {
@@ -676,6 +682,15 @@ static void shell_run_command(const char *cmd) {
     vga_puts("kheapcheck=");
     vga_puts(kheap_check() ? "OK" : "CORRUPT");
     vga_puts("\n"); 
+    }
+      else if (str_eq(cmd, "shutdown")) {
+        vga_puts("Shutting down...\n");
+        /* Signal QEMU to shutdown */
+        asm volatile ("outw %0, %1" : : "a"((uint16_t)0x2000), "Nd"((uint16_t)0x604));
+        asm volatile ("cli");
+        for (;;) {
+            asm volatile ("hlt");
+        }
     }
       else if (cmd[0] != 0) {
         klog_warn("unknown command");

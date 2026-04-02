@@ -53,6 +53,9 @@ ISR_NOERR   29
 ISR_NOERR   30
 ISR_NOERR   31
 
+# Syscall ISR (int 0x80)
+ISR_NOERR   128
+
 .global isr_default
 isr_default:
 	jmp isr0
