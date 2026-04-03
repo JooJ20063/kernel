@@ -1,5 +1,5 @@
-#include <arch/x86/irq.h>
-#include <arch/x86/pic.h>
+#include <arch/x86_64/irq.h>
+#include <arch/x86_64/pic.h>
 #include <kernel/vga.h>
 #include <kernel/sched.h>
 #include <kernel/shell.h>
@@ -15,6 +15,7 @@
 static uint32_t timer_hz_cfg = 100;
 static uint32_t timer_ticks;
 static uint32_t timer_seconds;
+static uint32_t timer_subticks;
 
 static uint8_t kbd_shift;
 static uint8_t kbd_caps;
@@ -30,10 +31,19 @@ static inline uint8_t inb(uint16_t port) {
 }
 
 static void pit_set_frequency(uint32_t hz) {
+    const uint32_t safe_default_hz = 100U;
     uint32_t divisor;
-    if (hz == 0) hz = 100;
+
+    /* Avoid #DE from PIT divisor calculation when a zero Hz is configured. */
+    if (hz == 0) {
+        hz = safe_default_hz;
+    }
+
     divisor = PIT_BASE_HZ / hz;
-    if (divisor == 0) divisor = 1;
+    if (divisor == 0) {
+        divisor = 1;
+    }
+
     outb(PIT_CMD_PORT, 0x36);
     outb(PIT_CH0_PORT, (uint8_t)(divisor & 0xFF));
     outb(PIT_CH0_PORT, (uint8_t)((divisor >> 8) & 0xFF));
@@ -77,9 +87,14 @@ static char kbd_translate_abnt2(uint8_t scancode, uint8_t shift, uint8_t caps) {
 }
 
 static void timer_irq(void) {
+    uint32_t hz_now;
+
     timer_ticks++;
     sched_tick();
-    if (timer_hz_cfg > 0 && (timer_ticks % timer_hz_cfg) == 0) {
+    hz_now = timer_hz_cfg ? timer_hz_cfg : 100U;
+    timer_subticks++;
+    if (timer_subticks >= hz_now) {
+        timer_subticks = 0;
         timer_seconds++;
     }
 }
@@ -105,6 +120,7 @@ void irq_init(uint32_t timer_hz, uint32_t scheduler_quantum_ticks) {
     sched_init(scheduler_quantum_ticks);
     timer_ticks = 0;
     timer_seconds = 0;
+    timer_subticks = 0;
     kbd_shift = 0;
     kbd_caps = 0;
     (void)inb(PIC1_DATA_PORT);

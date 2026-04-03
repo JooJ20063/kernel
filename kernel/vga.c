@@ -106,6 +106,15 @@ void vga_puthex(uint32_t value) {
     }
 }
 
+void vga_puthex64(uint64_t value) {
+    static const char *hex = "0123456789ABCDEF";
+
+    vga_puts("0x");
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        vga_putc(hex[(value >> shift) & 0xF]);
+    }
+}
+
 void vga_putdec(uint32_t value) {
     char buf[10];
     int i = 0;

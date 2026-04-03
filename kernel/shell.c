@@ -577,7 +577,7 @@ static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
         vga_puts("cmds: help clear ticks task pmm vmm wp nullguard kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic shutdown arch virt mapped unmap\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
-        vga_puts("panic modes: panic int3 | panic ud2 | panic div0 | panic null | panic int <n>\n");
+        vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
         vga_puts("heap dbg: kmalloc <bytes> | kfree <slot> | krealloc <slot> <bytes> | kslots | kheapcheck\n");
     } else if (str_eq(cmd, "arch")) {

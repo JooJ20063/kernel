@@ -89,3 +89,7 @@ void kernel_main(void) {
         asm volatile ("hlt");
     }
 }
+
+void kernel_main64(void) {
+    kernel_main();
+}
