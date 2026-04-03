@@ -91,10 +91,12 @@ static void timer_irq(void) {
 
     timer_ticks++;
     sched_tick();
-    hz_now = timer_hz_cfg ? timer_hz_cfg : 100U;
-    timer_subticks++;
-    if (timer_subticks >= hz_now) {
-        timer_subticks = 0;
+
+    /*
+     * Guard modulo against zero in case timer_hz_cfg was not initialized yet
+     * or was accidentally changed to 0 by future code paths.
+     */
+    if (timer_hz_cfg != 0 && (timer_ticks % timer_hz_cfg) == 0) {
         timer_seconds++;
     }
 }
