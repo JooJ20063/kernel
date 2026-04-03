@@ -30,10 +30,19 @@ static inline uint8_t inb(uint16_t port) {
 }
 
 static void pit_set_frequency(uint32_t hz) {
+    const uint32_t safe_default_hz = 100U;
     uint32_t divisor;
-    if (hz == 0) hz = 100;
+
+    /* Avoid #DE from PIT divisor calculation when a zero Hz is configured. */
+    if (hz == 0) {
+        hz = safe_default_hz;
+    }
+
     divisor = PIT_BASE_HZ / hz;
-    if (divisor == 0) divisor = 1;
+    if (divisor == 0) {
+        divisor = 1;
+    }
+
     outb(PIT_CMD_PORT, 0x36);
     outb(PIT_CH0_PORT, (uint8_t)(divisor & 0xFF));
     outb(PIT_CH0_PORT, (uint8_t)((divisor >> 8) & 0xFF));
@@ -79,7 +88,12 @@ static char kbd_translate_abnt2(uint8_t scancode, uint8_t shift, uint8_t caps) {
 static void timer_irq(void) {
     timer_ticks++;
     sched_tick();
-    if (timer_hz_cfg > 0 && (timer_ticks % timer_hz_cfg) == 0) {
+
+    /*
+     * Guard modulo against zero in case timer_hz_cfg was not initialized yet
+     * or was accidentally changed to 0 by future code paths.
+     */
+    if (timer_hz_cfg != 0 && (timer_ticks % timer_hz_cfg) == 0) {
         timer_seconds++;
     }
 }
