@@ -43,7 +43,7 @@ CFLAGS64 := -m64 -ffreestanding -Iinclude -Wall -Wextra -Werror
 ASFLAGS64 := --64
 LDFLAGS64 := -m elf_x86_64 -T linker64.ld
 
-.PHONY: all kernel64 iso iso64 run run64 clean check
+.PHONY: all kernel64 iso iso64 run run64 clean check check64 kernel64_full
 
 all: kernel.bin
 
@@ -57,6 +57,35 @@ kernel64.bin:
 	$(AS) $(ASFLAGS64) boot/gdt64.s -o build/boot/gdt64.o
 	$(AS) $(ASFLAGS64) boot/boot64.s -o build/boot/boot64.o
 	$(LD) $(LDFLAGS64) -o kernel64.bin build/kernel/kernel64.o build/arch/x86/idt64.o build/boot/gdt64.o build/boot/boot64.o
+
+kernel64_full.bin:
+	@mkdir -p $(BUILD_DIR)/kernel/x86_64 $(BUILD_DIR)/kernel $(BUILD_DIR)/arch/x86_64 $(BUILD_DIR)/boot
+	$(CC) $(CFLAGS64) -c kernel/x86_64/kernel.c -o build/kernel/x86_64/kernel.o
+	$(CC) $(CFLAGS64) -c kernel/vga.c -o build/kernel/vga64.o
+	$(CC) $(CFLAGS64) -c kernel/klog.c -o build/kernel/klog64.o
+	$(CC) $(CFLAGS64) -c kernel/panic.c -o build/kernel/panic64.o
+	$(CC) $(CFLAGS64) -c kernel/shell.c -o build/kernel/shell64.o
+	$(CC) $(CFLAGS64) -c kernel/pmm.c -o build/kernel/pmm64.o
+	$(CC) $(CFLAGS64) -c kernel/vmm64_stub.c -o build/kernel/vmm64.o
+	$(CC) $(CFLAGS64) -c kernel/kmalloc.c -o build/kernel/kmalloc64.o
+	$(CC) $(CFLAGS64) -c kernel/sched.c -o build/kernel/sched64.o
+	$(CC) $(CFLAGS64) -c kernel/vfs.c -o build/kernel/vfs64.o
+	$(CC) $(CFLAGS64) -c kernel/ramfs.c -o build/kernel/ramfs64.o
+	$(CC) $(CFLAGS64) -c arch/x86_64/idt.c -o build/arch/x86_64/idt64_full.o
+	$(CC) $(CFLAGS64) -c arch/x86_64/irq.c -o build/arch/x86_64/irq64_full.o
+	$(CC) $(CFLAGS64) -c arch/x86_64/pic.c -o build/arch/x86_64/pic64_full.o
+	$(AS) $(ASFLAGS64) boot/isr64.s -o build/boot/isr64.o
+	$(AS) $(ASFLAGS64) boot/irq64.s -o build/boot/irq64.o
+	$(AS) $(ASFLAGS64) boot/gdt64.s -o build/boot/gdt64.o
+	$(AS) $(ASFLAGS64) boot/boot64.s -o build/boot/boot64.o
+	$(LD) $(LDFLAGS64) -o kernel64_full.bin \
+		build/kernel/x86_64/kernel.o build/kernel/vga64.o build/kernel/klog64.o \
+		build/kernel/panic64.o build/kernel/shell64.o build/kernel/pmm64.o \
+		build/kernel/vmm64.o \
+		build/kernel/kmalloc64.o build/kernel/sched64.o build/kernel/vfs64.o \
+		build/kernel/ramfs64.o build/arch/x86_64/idt64_full.o \
+		build/arch/x86_64/irq64_full.o build/arch/x86_64/pic64_full.o \
+		build/boot/isr64.o build/boot/irq64.o build/boot/gdt64.o build/boot/boot64.o
 
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -72,6 +101,10 @@ $(BUILD_DIR)/boot/boot64.o: boot/boot64.s
 
 check:
 	$(CC) $(CFLAGS) -c $(C_SRCS)
+	rm -f *.o
+
+check64:
+	$(CC) $(CFLAGS64) -c kernel/x86_64/kernel.c arch/x86_64/idt.c arch/x86_64/irq.c arch/x86_64/pic.c kernel/shell.c kernel/panic.c kernel/vga.c kernel/klog.c kernel/sched.c kernel/pmm.c kernel/vmm64_stub.c kernel/kmalloc.c kernel/vfs.c kernel/ramfs.c
 	rm -f *.o
 
 iso: kernel.bin grub.cfg

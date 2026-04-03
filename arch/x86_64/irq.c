@@ -1,5 +1,5 @@
-#include <arch/x86/irq.h>
-#include <arch/x86/pic.h>
+#include <arch/x86_64/irq.h>
+#include <arch/x86_64/pic.h>
 #include <kernel/vga.h>
 #include <kernel/sched.h>
 #include <kernel/shell.h>
@@ -15,6 +15,7 @@
 static uint32_t timer_hz_cfg = 100;
 static uint32_t timer_ticks;
 static uint32_t timer_seconds;
+static uint32_t timer_subticks;
 
 static uint8_t kbd_shift;
 static uint8_t kbd_caps;
@@ -86,6 +87,8 @@ static char kbd_translate_abnt2(uint8_t scancode, uint8_t shift, uint8_t caps) {
 }
 
 static void timer_irq(void) {
+    uint32_t hz_now;
+
     timer_ticks++;
     sched_tick();
 
@@ -119,6 +122,7 @@ void irq_init(uint32_t timer_hz, uint32_t scheduler_quantum_ticks) {
     sched_init(scheduler_quantum_ticks);
     timer_ticks = 0;
     timer_seconds = 0;
+    timer_subticks = 0;
     kbd_shift = 0;
     kbd_caps = 0;
     (void)inb(PIC1_DATA_PORT);
