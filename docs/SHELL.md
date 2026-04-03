@@ -24,7 +24,7 @@ Fornecer uma interface mínima para inspeção/debug em runtime.
 - `panic`: aciona panic manual.
 - `panic int3`: dispara breakpoint exception.
 - `panic ud2`: dispara invalid opcode.
-- `panic div0`: dispara divisão por zero.
+- `panic div0`: modo de teste desativado (apenas aviso; não executa `#DE`).
 - `panic null`: tenta escrita em ponteiro nulo (esperado `#PF`).
 - `panic int <n>`: panic manual com metadata de interrupção.
 
@@ -37,7 +37,8 @@ Fornecer uma interface mínima para inspeção/debug em runtime.
 
 ## Segurança no comando panic
 
-Os modos como `panic div0`, `panic ud2` e `panic int3` são ferramentas de teste de falhas controladas.
+Os modos `panic ud2` e `panic int3` são ferramentas de teste de falhas controladas.
+No build 64-bit, `panic div0` fica desativado por segurança e retorna apenas aviso.
 
 Quando disparados:
 
@@ -100,7 +101,7 @@ O comando `panic` não é apenas um encerramento; é uma ferramenta de teste par
 | `panic` | Invocação Direta | Testa o fluxo de halting e dump de registos. |
 | `panic int3` | **#BP** (Breakpoint) | Valida interrupções de depuração. |
 | `panic ud2` | **#UD** (Invalid Opcode) | Testa a reação a código corrompido/malicioso. |
-| `panic div0` | **#DE** (Divide Error) | Garante que erros lógicos não travem a CPU. |
+| `panic div0` | Desativado no 64-bit | Evita `#DE` forçado por comando de teste. |
 | `panic int <n>`| Vetor Genérico | Auditoria de qualquer entrada da IDT via software. |
 
 ---
