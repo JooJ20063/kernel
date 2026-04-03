@@ -9,5 +9,6 @@ void vga_clear(void);
 void vga_putc(char c);
 void vga_puts(const char *s);
 void vga_puthex(uint32_t value);
+void vga_puthex64(uint64_t value);
 void vga_putdec(uint32_t value);
 void vga_write_at(uint16_t pos, const char *s);

@@ -8,8 +8,14 @@
 #include <kernel/panic.h>
 #include <kernel/vfs.h>
 #include <kernel/ramfs.h>
+
+#ifdef __x86_64__
+#include <arch/x86_64/irq.h>
+#include <arch/x86_64/regs.h>
+#else
 #include <arch/x86/irq.h>
 #include <arch/x86/regs.h>
+#endif
 
 #define SHELL_BUF 128
 #define KHEAP_SLOTS 16
@@ -187,13 +193,15 @@ static void shell_cmd_panic(const char *arg) {
     }
 
     if (str_eq(arg, "div0")) {
-        asm volatile (
-            "xor %%edx, %%edx\n"
-            "xor %%eax, %%eax\n"
-            "div %%edx\n"
-            :
-            :
-            : "eax", "edx");
+        // Trigger divide by zero interrupt (intentionally disabled)
+        // asm volatile (
+        //     "xor %%edx, %%edx\n"
+        //     "xor %%eax, %%eax\n"
+        //     "div %%edx\n"
+        //     :
+        //     :
+        //     : "eax", "edx");
+        klog_warn("div0: disabled - use 'panic ud2' or 'panic int3' instead");
         return;
     }
 

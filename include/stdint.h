@@ -13,7 +13,12 @@ typedef unsigned int	uint32_t;
 typedef signed long	int64_t;
 typedef unsigned long	uint64_t;
 
+#if defined(__x86_64__) || defined(__x86_64)
+typedef uint64_t	uintptr_t;
+typedef int64_t	intptr_t;
+#else
 typedef uint32_t	uintptr_t;
-typedef int32_t		intprt_t;
+typedef int32_t	intptr_t;
+#endif
 
 #endif
