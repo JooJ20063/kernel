@@ -106,7 +106,7 @@ static void timer_irq(void) {
     timer_ticks++;
     sched_tick();
 
-    if ((timer_ticks % timer_hz_cfg) == 0) {
+    if (timer_hz_cfg > 0 && (timer_ticks % timer_hz_cfg) == 0) {
         timer_seconds++;
     }
 

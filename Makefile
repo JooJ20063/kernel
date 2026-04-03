@@ -51,12 +51,25 @@ kernel.bin: $(OBJS)
 	$(LD) $(LDFLAGS) -o $@ $(OBJS)
 
 kernel64.bin:
-	@mkdir -p $(BUILD_DIR)/kernel $(BUILD_DIR)/boot $(BUILD_DIR)/arch/x86
-	$(CC) $(CFLAGS64) -c kernel/kernel64.c -o build/kernel/kernel64.o
-	$(CC) $(CFLAGS64) -c arch/x86/idt64.c -o build/arch/x86/idt64.o
-	$(AS) $(ASFLAGS64) boot/gdt64.s -o build/boot/gdt64.o
-	$(AS) $(ASFLAGS64) boot/boot64.s -o build/boot/boot64.o
-	$(LD) $(LDFLAGS64) -o kernel64.bin build/kernel/kernel64.o build/arch/x86/idt64.o build/boot/gdt64.o build/boot/boot64.o
+	@mkdir -p $(BUILD_DIR)/kernel64 $(BUILD_DIR)/arch/x86_64 $(BUILD_DIR)/boot/x86_64
+	$(CC) $(CFLAGS64) -c kernel/x86_64/kernel.c -o $(BUILD_DIR)/kernel64/kernel.o
+	$(CC) $(CFLAGS64) -c kernel/vga.c -o $(BUILD_DIR)/kernel64/vga.o
+	$(CC) $(CFLAGS64) -c kernel/pmm.c -o $(BUILD_DIR)/kernel64/pmm.o
+	$(CC) $(CFLAGS64) -c kernel/x86_64/vmm.c -o $(BUILD_DIR)/kernel64/vmm.o
+	$(CC) $(CFLAGS64) -c kernel/kmalloc.c -o $(BUILD_DIR)/kernel64/kmalloc.o
+	$(CC) $(CFLAGS64) -c kernel/vfs.c -o $(BUILD_DIR)/kernel64/vfs.o
+	$(CC) $(CFLAGS64) -c kernel/ramfs.c -o $(BUILD_DIR)/kernel64/ramfs.o
+	$(CC) $(CFLAGS64) -c kernel/sched.c -o $(BUILD_DIR)/kernel64/sched.o
+	$(CC) $(CFLAGS64) -c kernel/klog.c -o $(BUILD_DIR)/kernel64/klog.o
+	$(CC) $(CFLAGS64) -c kernel/panic.c -o $(BUILD_DIR)/kernel64/panic.o
+	$(CC) $(CFLAGS64) -c kernel/shell.c -o $(BUILD_DIR)/kernel64/shell.o
+	$(CC) $(CFLAGS64) -c arch/x86_64/idt.c -o $(BUILD_DIR)/arch/x86_64/idt.o
+	$(CC) $(CFLAGS64) -c arch/x86_64/irq.c -o $(BUILD_DIR)/arch/x86_64/irq.o
+	$(CC) $(CFLAGS64) -c arch/x86_64/pic.c -o $(BUILD_DIR)/arch/x86_64/pic.o
+	$(AS) $(ASFLAGS64) boot/x86_64/gdt.s -o $(BUILD_DIR)/boot/x86_64/gdt.o
+	$(AS) $(ASFLAGS64) boot/x86_64/isr.s -o $(BUILD_DIR)/boot/x86_64/isr.o
+	$(AS) $(ASFLAGS64) boot/x86_64/boot.s -o $(BUILD_DIR)/boot/x86_64/boot.o
+	$(LD) $(LDFLAGS64) -o kernel64.bin $(BUILD_DIR)/kernel64/kernel.o $(BUILD_DIR)/kernel64/vga.o $(BUILD_DIR)/kernel64/pmm.o $(BUILD_DIR)/kernel64/vmm.o $(BUILD_DIR)/kernel64/kmalloc.o $(BUILD_DIR)/kernel64/vfs.o $(BUILD_DIR)/kernel64/ramfs.o $(BUILD_DIR)/kernel64/sched.o $(BUILD_DIR)/kernel64/klog.o $(BUILD_DIR)/kernel64/panic.o $(BUILD_DIR)/kernel64/shell.o $(BUILD_DIR)/arch/x86_64/idt.o $(BUILD_DIR)/arch/x86_64/irq.o $(BUILD_DIR)/arch/x86_64/pic.o $(BUILD_DIR)/boot/x86_64/gdt.o $(BUILD_DIR)/boot/x86_64/isr.o $(BUILD_DIR)/boot/x86_64/boot.o
 
 kernel64_full.bin:
 	@mkdir -p $(BUILD_DIR)/kernel/x86_64 $(BUILD_DIR)/kernel $(BUILD_DIR)/arch/x86_64 $(BUILD_DIR)/boot
@@ -115,7 +128,7 @@ iso: kernel.bin grub.cfg
 
 iso64: kernel64.bin grub.cfg
 	mkdir -p $(ISO_GRUB)
-	cp kernel64.bin $(ISO_BOOT)/kernel.bin
+	cp kernel64.bin $(ISO_BOOT)/kernel64.bin
 	cp grub.cfg $(ISO_GRUB)/grub.cfg
 	grub-mkrescue -o kernel.iso $(ISO_DIR)
 
@@ -123,8 +136,8 @@ run: iso
 	qemu-system-i386 -cdrom kernel.iso -boot d
 
 run64: iso64
-	qemu-system-x86_64 -cdrom kernel.iso -boot d
+	qemu-system-x86_64 -cdrom kernel.iso -boot d -vga std
 
 clean:
-	rm -f kernel.bin kernel.iso
+	rm -f kernel.bin kernel.iso kernel64.bin
 	rm -rf $(ISO_DIR) $(BUILD_DIR)
