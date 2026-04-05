@@ -1,102 +1,15 @@
-# kernel
+# README
 
-Kernel educacional em **C + Assembly (x86 32-bit)** com:
-- IDT/ISRs/IRQs
-- PIC + PIT
-- teclado PS/2 (ABNT2 base, Shift/CapsLock)
-- PMM (bitmap de frames)
-- scheduler round-robin simples
-- VGA text mode + logging + shell primitivo
+## Recent Changes
 
-## Estrutura do projeto
+### x86_64 Support
+- Added full support for x86_64 architecture.
 
-```text
-.
-├── boot/
-├── arch/x86/
-├── include/arch/x86/
-├── include/kernel/
-│   ├── vga.h
-│   ├── sched.h
-│   ├── pmm.h
-│   ├── klog.h
-│   ├── panic.h
-│   └── shell.h
-├── kernel/
-│   ├── kernel.c
-│   ├── vga.c
-│   ├── sched.c
-│   ├── pmm.c
-│   ├── klog.c
-│   ├── panic.c
-│   └── shell.c
-├── .github/workflows/build.yml
-├── Makefile
-└── grub.cfg
-```
+### Timer Hardening
+- Implemented timer hardening techniques to improve security.
 
-## Funcionalidades implementadas
+### New Shell Commands
+- Added new shell commands: `arch` and `shutdown`.
 
-- **Kernel panic** com dump de registradores e halt (`kernel_panic`).
-- **Debug logging** com níveis (`DBG`, `INF`, `WRN`, `ERR`).
-- **Shell primitivo** (linha de comando no VGA).
-- **IRQ0**: timer configurável + tick do scheduler.
-- **IRQ1**: teclado com Shift/CapsLock e mapa ABNT2 base.
-- **PMM**: alocador/liberador de frames físicos de 4 KiB, inicializado via mapa de memória do Multiboot2.
-- **VMM**: paginação habilitada com mapeamento identidade inicial para o bootstrap e hardening de páginas `.text`/`.rodata` como read-only (com CR0.WP).
-- **kmalloc**: heap simples de kernel (bump allocator) sobre PMM+VMM para testes em Ring 0.
-- **VFS/RAMFS**: camada VFS mínima e RAMFS sobre TAR (initramfs) sem cópia de payload, com interface POSIX-like (`read`, `write`, `open`, `close`, `readdir`).
-
-## Comandos do shell
-
-- `help`
-- `clear`
-- `ticks`
-- `task`
-- `pmm`
-- `vmm`
-- `wp`
-- `nullguard`
-- `kheap`
-- `kmalloc <bytes>`
-- `ls`
-- `cat <arquivo>`
-- `touch <arquivo>`
-- `echo <texto> > <arquivo>`
-- `cat > <arquivo> <texto>`
-- `echo <texto>`
-- `panic`
-- `panic int3`
-- `panic ud2`
-- `panic div0`
-- `panic int <n>`
-
-## Uso rápido
-
-```bash
-make            # build (objetos em build/)
-make check      # checagem freestanding dos .c
-make iso        # gerar ISO (requer grub-mkrescue)
-make run        # rodar no qemu via CD
-make clean
-```
-
-## CI
-
-Há workflow em `.github/workflows/build.yml` rodando:
-- `make clean && make`
-- `make check`
-- sanity check: definição única de `kernel_main` em `kernel/kernel.c`
-
-## Observações
-
-- `grub.cfg` espera `/boot/kernel.bin`.
-- `make iso` depende de `grub-mkrescue` no host.
-
-
-## Documentação
-
-- [Arquitetura](docs/ARCHITECTURE.md)
-- [Shell](docs/SHELL.md)
-- [Guia de desenvolvimento](docs/DEVELOPMENT.md)
-- [Proteção de memória (plano)](docs/MEMORY_PROTECTION.md)
+## Overview
+This repository contains the kernel source code with various functionalities and tuned performance for systems under different architectures.
