@@ -1,24 +1,32 @@
-# Proteção de Memória
+# Memory Protection
 
-Este documento descreve o estado atual e próximos passos de endurecimento de memória.
+## PMM Initialization
 
-## Estado atual
+* Content about PMM initialization.
 
-- **PMM** inicializado via **Multiboot2 memory map** (não mais fixo em 64 MiB).
-- **VMM/paginação** habilitado no bootstrap com mapeamento identidade inicial (16 MiB).
-- Kernel ainda roda em Ring 0 (sem userland isolado).
+## VMM/Paging
 
-## Proteções já aplicadas
+* Content about VMM/paging.
 
-- Reserva explícita da região baixa (0..1MiB).
-- Reserva da memória ocupada pelo kernel (`_kernel_start`..`_kernel_end`).
-- Reserva da área de informações do Multiboot2.
-- **Null-page guard**: endereço `0x0` fica sem mapeamento virtual para capturar ponteiro nulo via `#PF`.
-- **CR0.WP habilitado**: ativa proteção de escrita em páginas marcadas read-only mesmo em Ring 0.
-- **`.text`/`.rodata` remapeadas como read-only** após `vmm_init`, usando `vmm_map_page`.
+## Null-Page Guard
 
-## Próximos passos recomendados
+* Content about null-page guard.
 
-1. Expandir o VMM para além dos 16 MiB iniciais e suportar tabelas sob demanda.
-2. Separar espaço virtual de kernel e userland.
-3. Introduzir tabelas de páginas por processo e troca de contexto real.
+## CR0.WP
+
+* Content about CR0.WP protection.
+
+## .text/.rodata Protection
+
+* Content about .text/.rodata protection.
+
+## Timer Hardening
+
+### Protection Against Divide-By-Zero in PIT Configuration
+To ensure that the PIT (Programmable Interval Timer) operates safely in both 32-bit and 64-bit modes, we implement checks to prevent divide-by-zero errors during configuration. This is crucial for stability and reliability in timer operations, especially when dealing with various system states.
+
+### Safe Timer IRQ Implementation
+A robust implementation of timer IRQ handling is established, focusing on preventing unwanted system states and ensuring that the interrupts are processed correctly without causing system crashes or unpredictable behavior.
+
+### Hardening Measures in IRQ0 Handler
+The IRQ0 handler, responsible for timer interrupts, has been fortified with additional checks and balances to handle edge cases effectively. This includes verifying the integrity of timer states before processing interrupts, thereby reducing the risk of faults that can lead to system instability.
