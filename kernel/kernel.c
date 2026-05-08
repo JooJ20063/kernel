@@ -1,6 +1,7 @@
 #include <arch/x86/idt.h>
 #include <arch/x86/pic.h>
 #include <arch/x86/irq.h>
+#include <arch/x86/regs.h>
 #include <kernel/vga.h>
 #include <kernel/pmm.h>
 #include <kernel/vmm.h>
@@ -10,6 +11,7 @@
 #include <kernel/shell.h>
 #include <kernel/ramfs.h>
 #include <kernel/syscall.h>
+#include <kernel/sched.h>
 
 struct exception_info {
     const char *name;
@@ -36,6 +38,15 @@ static const struct exception_info exc[] = {
     {"28", "Hypervisor injection"}, {"29", "VMM communication"}, {"30", "Security exception"},
     {"31", "Reserved"}
 };
+
+#define PF_PRESENT     0x1U
+#define PF_WRITE       0x2U
+#define PF_USER        0x4U
+#define PF_RESERVED    0x8U
+#define PF_INSTR       0x10U
+
+#define KERNEL_STACK_LOW  0x00118000U
+#define KERNEL_STACK_HIGH 0x0011C000U
 
 static int map_range_flags(uintptr_t start, uintptr_t end, uint32_t flags) {
     uintptr_t page_start = start & ~(uintptr_t)0xFFFU;
@@ -91,9 +102,110 @@ static void syscall_handler(registers_t *r) {
     }
 }
 
+
+static void page_fault_classify(registers_t *r, uint32_t addr, uint32_t err) {
+    vga_puts("Type: ");
+
+    if ((err & PF_PRESENT) && (err & PF_WRITE)) {
+        vga_puts("WRITE TO READ-ONLY PAGE");
+    } else if (!(err & PF_PRESENT)) {
+        uint32_t stack_guard = (r->esp & 0xFFFFF000U) - 0x1000U;
+
+        if (addr == 0 || addr < 0x1000U) {
+            vga_puts("NULL POINTER / INVALID ACCESS");
+        } else if ((addr & 0xFFFFF000U) == stack_guard) {
+            vga_puts("STACK OVERFLOW / GUARD PAGE");
+        } else {
+            vga_puts("NON-PRESENT PAGE / INVALID ACCESS");
+        }
+    } else if (err & PF_RESERVED) {
+        vga_puts("RESERVED PAGE-TABLE BIT VIOLATION");
+    } else if (err & PF_INSTR) {
+        vga_puts("INSTRUCTION FETCH FAULT");
+    } else {
+        vga_puts("UNKNOWN PAGE FAULT");
+    }
+
+    vga_puts("\n");
+}
+
+static void print_pf_error(uint32_t err) {
+    vga_puts("PF flags: ");
+
+    vga_puts((err & 0x1) ? "PRESENT " : "NON-PRESEN T");
+    vga_puts((err & 0x2) ? "WRITE " : "READ ");
+    vga_puts((err & 0x4) ? "USER " : "KERNEL ");
+    vga_puts((err & 0x8) ? "RESERVED-BIT " : "");
+    vga_puts((err & 0x10) ? "INSTRUCTION-FETCH " : "");
+
+    vga_puts("\n");
+
+}   
+
+static uint32_t read_cr2(void) {
+    uint32_t value;
+    asm volatile ("mov %%cr2, %0" : "=r"(value));
+    return value;
+}
+
+static void page_fault_handler(registers_t *r) {
+    uint32_t fault_addr = read_cr2();
+
+    vga_set_color(0x0F, 0x04);
+    vga_clear();
+
+    vga_puts("*** PAGE FAULT ***\n\n");
+
+    vga_puts("Fault address CR2: ");
+    vga_puthex(fault_addr);
+    vga_puts("\n");
+
+    vga_puts("Error code: ");
+    vga_puthex(r->err);
+    vga_puts("\n");
+
+    page_fault_classify(r, fault_addr, r->err);
+    print_pf_error(r->err);
+
+    vga_puts("\nCPU state:\n");
+
+    vga_puts("EIP: ");
+    vga_puthex(r->eip);
+    vga_puts(" ESP: ");
+    vga_puthex(r->esp);
+    vga_puts(" EBP= ");
+    vga_puthex(r->ebp);
+    vga_puts("\n");
+
+    vga_puts("EAX=");
+    vga_puthex(r->eax);
+    vga_puts(" EBX=");
+    vga_puthex(r->ebx);
+    vga_puts(" ECX=");
+    vga_puthex(r->ecx);
+    vga_puts(" EDX=");
+    vga_puthex(r->edx);
+    vga_puts("\n");
+
+    vga_puts("CS=");
+    vga_puthex(r->cs);
+    vga_puts(" EFLAGS=");
+    vga_puthex(r->eflags);
+    vga_puts("\n");
+
+    for (;;) {
+        asm volatile("cli; hlt");
+    }
+}
+
 void isr_handler_c(registers_t *r){
     if (r->int_no == 128) {
         syscall_handler(r);
+        return;
+    }
+
+    if (r->int_no == 14) {
+        page_fault_handler(r);
         return;
     }
 
@@ -129,6 +241,7 @@ void kernel_main(uint32_t mb_info_addr) {
    protect_kernel_ro_sections();
    kmalloc_init();
    init_ramfs(0, 0);
+   sched_demo_init();
 
    klog_info("interrupts configured");
    vga_puts("PMM free frames=");
@@ -142,6 +255,7 @@ void kernel_main(uint32_t mb_info_addr) {
    asm volatile ("sti");
 
    shell_init();
+   sched_demo_init();
 
    for(;;) {
        asm volatile ("hlt");

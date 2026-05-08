@@ -16,7 +16,7 @@ C_SRCS := \
 	kernel/kmalloc.c \
 	kernel/vfs.c \
 	kernel/ramfs.c \
-	kernel/sched.c \
+	kernel/task.c \
 	kernel/klog.c \
 	kernel/panic.c \
 	kernel/shell.c \
@@ -60,6 +60,7 @@ kernel64.bin:
 	$(CC) $(CFLAGS64) -c kernel/vfs.c -o $(BUILD_DIR)/kernel64/vfs.o
 	$(CC) $(CFLAGS64) -c kernel/ramfs.c -o $(BUILD_DIR)/kernel64/ramfs.o
 	$(CC) $(CFLAGS64) -c kernel/sched.c -o $(BUILD_DIR)/kernel64/sched.o
+	$(CC) $(CFLAGS64) -c kernel/task.c -o $(BUILD_DIR)/kernel64/task.o
 	$(CC) $(CFLAGS64) -c kernel/klog.c -o $(BUILD_DIR)/kernel64/klog.o
 	$(CC) $(CFLAGS64) -c kernel/panic.c -o $(BUILD_DIR)/kernel64/panic.o
 	$(CC) $(CFLAGS64) -c kernel/shell.c -o $(BUILD_DIR)/kernel64/shell.o

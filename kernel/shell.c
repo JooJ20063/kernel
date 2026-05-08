@@ -8,6 +8,7 @@
 #include <kernel/panic.h>
 #include <kernel/vfs.h>
 #include <kernel/ramfs.h>
+#include <kernel/task.h>
 
 #ifdef __x86_64__
 #include <arch/x86_64/irq.h>
@@ -174,6 +175,52 @@ static int heap_find_free_slot(void) {
 
 static int heap_slot_valid(uint32_t slot) {
     return (slot < KHEAP_SLOTS && heap_slots[slot] != 0);
+}
+
+__attribute__((noinline, noreturn))
+static void force_stack_overflow(uint32_t depth){
+
+    volatile uint8_t buffer[4096];
+
+    buffer[0] = (uint8_t)depth;
+    buffer[4095] = (uint8_t)(depth >> 8);
+
+    asm volatile ("" : : "g"(buffer) : "memory");
+
+    force_stack_overflow(depth + 1);
+}
+
+static void shell_cmd_pfault(const char *arg) {
+    if (arg == 0 || *arg ==0){
+        klog_warn("usage: pfault [null|readonly|invalid|stack]");
+        return;
+    }
+
+    if (str_eq(arg, "null")) {
+        volatile uint32_t *p = (volatile uint32_t *)0x0;
+        *p = 0xDEADBEEFU;
+        return;
+    }
+
+    if (str_eq(arg, "readonly")) {
+        extern uint8_t _rodata_start;
+        volatile uint32_t *p = (volatile uint32_t *)&_rodata_start;
+        *p = 0xCAFEBABEU;
+        return;
+    }
+
+    if (str_eq(arg, "invalid")) {
+        volatile uint32_t *p = (volatile  uint32_t *)0xA000000U;
+        *p = 0x12345678U;
+        return;
+    }
+
+    if (str_eq(arg, "stack")) {
+        force_stack_overflow(0);
+        return;
+}
+
+    klog_warn("usage:pfault [null|readonly|invalid|stack]");
 }
 
 static void shell_cmd_panic(const char *arg) {
@@ -575,7 +622,7 @@ static void shell_cmd_krealloc_slot(const char *arg) {
 
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task pmm vmm wp nullguard kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic shutdown arch virt mapped unmap\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic shutdown arch virt mapped unmap\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
@@ -597,12 +644,23 @@ static void shell_run_command(const char *cmd) {
         vga_putdec(irq_timer_hz());
         vga_puts("\n");
     } else if (str_eq(cmd, "task")) {
-        vga_puts("task=");
-        vga_putdec(sched_current_task());
-        vga_puts(" switches=");
-        vga_putdec(sched_switch_count());
-        vga_puts("\n");
-    } else if (str_eq(cmd, "pmm")) {
+    vga_puts("current pid=");
+    vga_putdec(sched_current_pid());
+
+    vga_puts(" tasks=");
+    vga_putdec(sched_task_count());
+
+    vga_puts(" switches=");
+    vga_putdec(sched_switch_count());
+
+    vga_puts(" demoA=");
+    vga_putdec(sched_demo_counter_a());
+
+    vga_puts(" demoB=");
+    vga_putdec(sched_demo_counter_b());
+
+    vga_puts("\n");
+} else if (str_eq(cmd, "pmm")) {
         vga_puts("frames total=");
         vga_putdec(pmm_total_frame_count());
         vga_puts(" free=");
@@ -685,13 +743,15 @@ static void shell_run_command(const char *cmd) {
         shell_cmd_unmap(skip_spaces(cmd + 6));
     } else if (str_eq(cmd, "panic") || str_starts(cmd, "panic ")) {
         shell_cmd_panic(cmd[5] ? cmd + 6 : 0);
-    } 
-      else if (str_eq(cmd, "kheapcheck")) {
+    } else if (str_eq(cmd, "pfault") || str_starts(cmd, "pfault ")) {
+    shell_cmd_pfault(cmd[6] ? skip_spaces(cmd + 7) : 0);
+} else if (str_eq(cmd, "kheapcheck")) {
     vga_puts("kheapcheck=");
     vga_puts(kheap_check() ? "OK" : "CORRUPT");
     vga_puts("\n"); 
-    }
-      else if (str_eq(cmd, "shutdown")) {
+    } else if (str_eq(cmd, "ps")) {
+        task_list_tasks();
+    } else if (str_eq(cmd, "shutdown")) {
         vga_puts("Shutting down...\n");
         /* Signal QEMU to shutdown */
         asm volatile ("outw %0, %1" : : "a"((uint16_t)0x2000), "Nd"((uint16_t)0x604));

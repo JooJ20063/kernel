@@ -3,6 +3,8 @@
 #include <kernel/vga.h>
 #include <kernel/sched.h>
 #include <kernel/shell.h>
+#include <kernel/task.h>
+
 
 #define PIC1_DATA_PORT 0x21
 #define PIC2_DATA_PORT 0xA1
@@ -104,7 +106,6 @@ static char kbd_translate_abnt2(uint8_t scancode, uint8_t shift, uint8_t caps) {
 
 static void timer_irq(void) {
     timer_ticks++;
-    sched_tick();
 
     if (timer_hz_cfg > 0 && (timer_ticks % timer_hz_cfg) == 0) {
         timer_seconds++;
@@ -182,15 +183,19 @@ uint32_t irq_timer_hz(void) {
     return timer_hz_cfg;
 }
 
-void irq_handler_c(registers_t *regs) {
+registers_t *irq_handler_c(registers_t *regs) {
     if (regs->int_no < 32 || regs->int_no > 47) {
-        return;
+        return regs;
     }
 
-    switch (regs->int_no - 32) {
+    uint32_t irq_no = regs->int_no - 32;
+
+    switch (irq_no) {
         case 0:
             timer_irq();
-            break;
+            pic_send_eoi(irq_no);
+            regs = sched_tick_irq(regs);
+            return regs;
         case 1:
             keyboard_irq();
             break;
@@ -198,5 +203,6 @@ void irq_handler_c(registers_t *regs) {
             break;
     }
 
-    pic_send_eoi(regs->int_no - 32);
+    pic_send_eoi(irq_no);
+    return regs;
 }

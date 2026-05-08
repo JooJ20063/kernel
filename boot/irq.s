@@ -45,7 +45,17 @@ irq_common_stub:
 	push %esp
 	call irq_handler_c
 	add $4, %esp
-	
+
+	test %eax, %eax
+	jz 1f
+	mov %eax, %esp
+	1:
+	# irq_handler_c may return a different saved CPU frame.
+	# This is what turns the PIT IRQ into a real preemptive scheduler.
+	test %eax, %eax
+	jz 1f
+	mov %eax, %esp
+1:
 	pop %gs
 	pop %fs
 	pop %es

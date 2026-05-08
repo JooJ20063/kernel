@@ -8,4 +8,4 @@ uint32_t irq_timer_ticks(void);
 uint32_t irq_timer_seconds(void);
 uint32_t irq_timer_hz(void);
 
-void irq_handler_c(registers_t *regs);
+registers_t *irq_handler_c(registers_t *regs);
