@@ -12,6 +12,7 @@
 #include <kernel/ramfs.h>
 #include <kernel/syscall.h>
 #include <kernel/sched.h>
+#include <arch/x86/fpu.h>
 
 struct exception_info {
     const char *name;
@@ -140,7 +141,7 @@ static void print_pf_error(uint32_t err) {
 
     vga_puts("\n");
 
-}   
+}
 
 static uint32_t read_cr2(void) {
     uint32_t value;
@@ -199,6 +200,11 @@ static void page_fault_handler(registers_t *r) {
 }
 
 void isr_handler_c(registers_t *r){
+    if (r->int_no == 7) {
+    fpu_handle_nm();
+    return;
+}
+    
     if (r->int_no == 128) {
         syscall_handler(r);
         return;
@@ -235,6 +241,8 @@ void kernel_main(uint32_t mb_info_addr) {
    pic_unmask_irq(1); /* keyboard */
 
    irq_init(100, 25);
+
+    fpu_init();
 
    pmm_init_from_multiboot(mb_info_addr, (uintptr_t)&_kernel_start, (uintptr_t)&_kernel_end);
    vmm_init();

@@ -1,4 +1,5 @@
 #include <kernel/task.h>
+#include <arch/x86/fpu.h>
 #include <kernel/kmalloc.h>
 #include <kernel/vga.h>
 
@@ -19,6 +20,10 @@ static task_t *task_list = 0;
 
 static volatile uint32_t demo_counter_a = 0;
 static volatile uint32_t demo_counter_b = 0;
+
+
+static volatile float sse_value_a = 0.0f;
+static volatile float sse_value_b = 0.0f;
 
 static void mem_zero(void *ptr, uint32_t size) {
     uint8_t *p = (uint8_t *)ptr;
@@ -94,6 +99,10 @@ void sched_init(uint32_t quantum_ticks) {
     idle_task.kernel_stack = 0;
     idle_task.kernel_stack_size = 0;
     idle_task.next = 0;
+    idle_task.cr3 = 0;
+    idle_task.fpu_storage = 0;
+    idle_task.fpu_area = 0;
+    idle_task.fpu_initialized = 0;
 
     add_task(&idle_task);
 
@@ -129,6 +138,8 @@ registers_t *sched_tick_irq(registers_t *regs) {
     next->state = TASK_RUNNING;
     current = next;
     switches++;
+
+    fpu_set_ts();
 
     return next->context;
 }
@@ -173,21 +184,29 @@ int sched_create_kernel_task(void (*entry)(void)) {
     task->context = frame;
     task->kernel_stack = stack;
     task->kernel_stack_size = KERNEL_STACK_SIZE;
-
     add_task(task);
+
+    task->cr3 = 0;
+    fpu_init_task(task);
 
     return (int)task->pid;
 }
 
 static void demo_task_a(void) {
+    float x = 1.0f;
+
     for (;;) {
-        demo_counter_a++;
+        x += 0.25f;
+        sse_value_a = x;
     }
 }
 
 static void demo_task_b(void) {
+    float x = 1.0f;
+
     for (;;) {
-        demo_counter_b++;
+        x += 0.25f;
+        sse_value_b = x;
     }
 }
 
@@ -274,4 +293,16 @@ void task_exit(void) {
     for (;;) {
         task_yield();
     }
+}
+
+task_t *sched_current_task_ptr(void) {
+    return current;
+}
+
+uint32_t sched_sse_value_a(void) {
+    return (uint32_t)sse_value_a;
+}
+
+uint32_t sched_sse_value_b(void) {
+    return (uint32_t)sse_value_b;
 }

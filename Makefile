@@ -22,7 +22,8 @@ C_SRCS := \
 	kernel/shell.c \
 	arch/x86/idt.c \
 	arch/x86/irq.c \
-	arch/x86/pic.c
+	arch/x86/pic.c \
+	arch/x86/fpu.c
 
 ASM_SRCS := \
 	boot/boot.s \
@@ -67,6 +68,7 @@ kernel64.bin:
 	$(CC) $(CFLAGS64) -c arch/x86_64/idt.c -o $(BUILD_DIR)/arch/x86_64/idt.o
 	$(CC) $(CFLAGS64) -c arch/x86_64/irq.c -o $(BUILD_DIR)/arch/x86_64/irq.o
 	$(CC) $(CFLAGS64) -c arch/x86_64/pic.c -o $(BUILD_DIR)/arch/x86_64/pic.o
+	$(CC) $(CFLAGS64) -c arch/x86_64/fpu.c -o $(BUILD_DIR)/arch/x86_64/fpu.o
 	$(AS) $(ASFLAGS64) boot/x86_64/gdt.s -o $(BUILD_DIR)/boot/x86_64/gdt.o
 	$(AS) $(ASFLAGS64) boot/x86_64/isr.s -o $(BUILD_DIR)/boot/x86_64/isr.o
 	$(AS) $(ASFLAGS64) boot/x86_64/boot.s -o $(BUILD_DIR)/boot/x86_64/boot.o

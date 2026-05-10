@@ -4,6 +4,7 @@
 #include <kernel/sched.h>
 #include <kernel/shell.h>
 #include <kernel/task.h>
+#include <arch/x86/fpu.h>
 
 
 #define PIC1_DATA_PORT 0x21
@@ -184,12 +185,18 @@ uint32_t irq_timer_hz(void) {
 }
 
 registers_t *irq_handler_c(registers_t *regs) {
+      /* #NM - Device Not Available */
+    if (regs->int_no == 7) {
+        fpu_handle_nm();
+        return regs;
+    }
+
+    /* Não é IRQ */
     if (regs->int_no < 32 || regs->int_no > 47) {
         return regs;
     }
 
     uint32_t irq_no = regs->int_no - 32;
-
     switch (irq_no) {
         case 0:
             timer_irq();
@@ -201,7 +208,7 @@ registers_t *irq_handler_c(registers_t *regs) {
             break;
         default:
             break;
-    }
+        }
 
     pic_send_eoi(irq_no);
     return regs;
