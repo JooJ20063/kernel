@@ -191,6 +191,10 @@ registers_t *irq_handler_c(registers_t *regs) {
         return regs;
     }
 
+    if (regs->int_no == 129) {
+        return sched_yield_irq(regs);
+    }
+
     /* Não é IRQ */
     if (regs->int_no < 32 || regs->int_no > 47) {
         return regs;
