@@ -622,7 +622,7 @@ static void shell_cmd_krealloc_slot(const char *arg) {
 
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task ps pmm vmm wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic shutdown arch virt mapped unmap\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic shutdown arch virt mapped unmap schedtest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
@@ -664,6 +664,18 @@ static void shell_run_command(const char *cmd) {
 
     vga_puts(" sseB=");
     vga_putdec((uint32_t)sched_sse_value_b);
+    
+    vga_puts(" sleep=");
+    vga_putdec(sched_sleep_demo_counter());
+
+    vga_puts(" evA=");
+    vga_putdec(sched_event_a_counter());
+
+    vga_puts(" evB=");
+    vga_putdec(sched_event_b_counter());
+
+    vga_puts(" wake=");
+    vga_putdec(sched_event_waker_counter());
 
     vga_puts("\n");
 } else if (str_eq(cmd, "pmm")) {
@@ -765,8 +777,11 @@ static void shell_run_command(const char *cmd) {
         for (;;) {
             asm volatile ("hlt");
         }
-    }
-      else if (cmd[0] != 0) {
+    } else if (str_eq(cmd, "schedtest")) {
+        sched_demo_init();
+        vga_puts("scheduler tests started\n");
+        return;
+    } else if (cmd[0] != 0) {
         klog_warn("unknown command");
     }
 

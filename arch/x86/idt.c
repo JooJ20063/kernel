@@ -117,6 +117,7 @@ extern void irq12();
 extern void irq13();
 extern void irq14();
 extern void irq15();
+extern void irq_yield();
 
 void idt_install_irqs(void) {
     idt_set_gate(32, (uint32_t)irq0);
@@ -135,4 +136,6 @@ void idt_install_irqs(void) {
     idt_set_gate(45, (uint32_t)irq13);
     idt_set_gate(46, (uint32_t)irq14);
     idt_set_gate(47, (uint32_t)irq15);
+    
+    idt_set_gate(129, (uint32_t)irq_yield);
 }

@@ -249,7 +249,6 @@ void kernel_main(uint32_t mb_info_addr) {
    protect_kernel_ro_sections();
    kmalloc_init();
    init_ramfs(0, 0);
-   sched_demo_init();
 
    klog_info("interrupts configured");
    vga_puts("PMM free frames=");
@@ -263,7 +262,6 @@ void kernel_main(uint32_t mb_info_addr) {
    asm volatile ("sti");
 
    shell_init();
-   sched_demo_init();
 
    for(;;) {
        asm volatile ("hlt");

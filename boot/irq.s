@@ -29,6 +29,14 @@ IRQ 13
 IRQ 14
 IRQ 15
 
+.global irq_yield
+irq_yield:
+	cli
+	pushl $0
+	pushl $129
+	jmp irq_common_stub
+
+
 irq_common_stub:
 	pusha
 	push %ds
