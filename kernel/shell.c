@@ -660,10 +660,10 @@ static void shell_run_command(const char *cmd) {
     vga_putdec(sched_demo_counter_b());
 
     vga_puts(" sseA=");
-    vga_putdec((uint32_t)sched_sse_value_a);
+    vga_putdec((uint32_t)sched_sse_value_a());
 
     vga_puts(" sseB=");
-    vga_putdec((uint32_t)sched_sse_value_b);
+    vga_putdec((uint32_t)sched_sse_value_b());
     
     vga_puts(" sleep=");
     vga_putdec(sched_sleep_demo_counter());
