@@ -12,7 +12,7 @@ typedef enum task_state {
     TASK_ZOMBIE
 } task_state_t;
 
-typedef enum task_blcok_reason {
+typedef enum task_block_reason {
     TASK_BLOCK_NONE = 0,
     TASK_BLOCK_SLEEP,
     TASK_BLOCK_EVENT
