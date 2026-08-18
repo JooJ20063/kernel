@@ -4,6 +4,7 @@
 
 #define VMM_PAGE_PRESENT 0x001U
 #define VMM_PAGE_RW	 0X002U
+#define VMM_PAGE_USER	 0X004U
 
 void vmm_init(void);
 uint8_t vmm_is_enabled(void);

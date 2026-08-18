@@ -1,129 +1,782 @@
-# Shell primitivo
+# Cruzeiro Kernel Diagnostic Shell
 
-## Objetivo
-Fornecer uma interface mínima para inspeção/debug em runtime.
+The **Cruzeiro Kernel (CZK)** includes a minimal diagnostic shell used for runtime inspection, subsystem testing, and kernel development.
 
-## Comandos
+The shell currently runs entirely in **Ring 0** and should not be confused with the future Cruzeiro OS userspace shell.
 
-- `help`: lista comandos.
-- `clear`: limpa tela VGA.
-- `ticks`: mostra ticks, segundos e HZ do timer.
-- `task`: mostra tarefa atual e switches do scheduler.
-- `pmm`: mostra total/livres de frames do PMM.
-- `vmm`: estado da paginação e do bit CR0.WP.
-- `wp`: mostra apenas estado do CR0.WP.
-- `nullguard`: lembrete de teste do null-page guard.
-- `kheap`: estado do heap do kernel (`kmalloc`).
-- `kmalloc <bytes>`: aloca memória no heap de kernel, escreve padrão de teste e imprime endereço.
-- `ls`: lista entradas do RAMFS no VFS raiz.
-- `cat <arquivo>`: lê arquivo do RAMFS via VFS.
-- `touch <arquivo>`: cria arquivo vazio no RAMFS (se não existir).
-- `echo <texto> > <arquivo>`: cria/sobrescreve arquivo no RAMFS.
-- `cat > <arquivo> <texto>`: atalho de escrita usando `cat` em modo simples.
-- `echo <texto>`: imprime texto.
-- `panic`: aciona panic manual.
-- `panic int3`: dispara breakpoint exception.
-- `panic ud2`: dispara invalid opcode.
-- `panic div0`: modo de teste desativado (apenas aviso; não executa `#DE`).
-- `panic null`: tenta escrita em ponteiro nulo (esperado `#PF`).
-- `panic int <n>`: panic manual com metadata de interrupção.
-
-## Limitações atuais
-
-- Sem histórico de comandos.
-- Sem edição avançada de linha.
-- Parser simples (sem quoting/escaping).
-
-
-## Segurança no comando panic
-
-Os modos `panic ud2` e `panic int3` são ferramentas de teste de falhas controladas.
-No build 64-bit, `panic div0` fica desativado por segurança e retorna apenas aviso.
-
-Quando disparados:
-
-1. o kernel captura o evento por ISR;
-2. chama o handler de panic central;
-3. imprime contexto (registradores/causa);
-4. entra em halt seguro.
-
-Isso evita estado indefinido e facilita depuração reproduzível.
-# 📑 Especificação da Interface de Controle (Shell)
-
-O Shell do sistema é uma interface de linha de comando (CLI) minimalista, operando em Ring 0, projetada para diagnóstico em tempo real, auditoria de recursos de hardware e testes de resiliência do Kernel.
+Its primary purpose is kernel diagnostics.
 
 ---
 
-## 1. Filosofia de Design e Segurança
+## 1. Overview
 
-Diferente de shells de alto nível, esta interface foi construída com foco em estabilidade absoluta:
+The CZK diagnostic shell provides direct access to several kernel subsystems, including:
 
-* **Sanitização de Entrada:** O buffer de entrada (`SHELL_BUF`) é rigorosamente limitado a 128 bytes. O sistema ignora qualquer tentativa de escrita além deste limite, prevenindo ataques de *Stack Smashing*.
-* **Parser Determinístico:** A execução ocorre apenas após a detecção do caractere de terminação (`\n`). O parser utiliza comparações binárias diretas, evitando dependências externas complexas.
-* **Comunicação Direta com o Kernel:** O Shell atua como um supervisor, extraindo dados diretamente dos subsistemas PMM, Scheduler e IRQ.
+- timer;
+- scheduler;
+- tasks;
+- physical memory;
+- virtual memory;
+- kernel heap;
+- VFS;
+- RAMFS;
+- system calls;
+- TSS;
+- exception testing;
+- kernel logging and diagnostics.
 
----
+The current input path is:
 
-## 2. Dicionário de Comandos
+```text
+PS/2 Keyboard
+   ↓
+IRQ1
+   ↓
+keyboard handler
+   ↓
+scancode translation
+   ↓
+shell input buffer
+   ↓
+command parser
+```
 
-### 🛠️ Gestão e Diagnóstico do Sistema
-| Comando | Descrição Técnica | Objetivo de Auditoria |
-| :--- | :--- | :--- |
-| `help` | Lista os comandos registrados. | Verificação de disponibilidade de rotinas. |
-| `clear` | Reseta o cursor e limpa o buffer VGA. | Reinicialização da interface visual. |
-| `ticks` | Exibe Ticks, Segundos e frequência Hz. | Validação da precisão do Timer (IRQ0). |
-| `task` | Identifica a tarefa e context switches. | Monitorização da saúde do Scheduler. |
-| `pmm` | Reporta o estado da memória física. | Verificação de fugas de memória (frames). |
-| `vmm` | Exibe estado do paging e CR0.WP. | Auditoria de hardening da memória no Ring 0. |
-| `wp` | Mostra apenas CR0.WP. | Confirma proteção de escrita em páginas RO. |
-| `nullguard` | Explica teste de null-page guard. | Verifica captura de ponteiro nulo via `panic null`. |
-| `kheap` | Exibe bytes usados/mapeados no heap. | Inspeção do uso de `kmalloc`. |
-| `kmalloc <n>` | Aloca `n` bytes e faz write-test. | Teste positivo de mapeamento e escrita de heap. |
-| `ls` | Lista os nós montados no RAMFS. | Verifica parser TAR e enumeração de diretório. |
-| `cat <arquivo>` | Lê arquivo via `read_fs`. | Verifica caminho de leitura VFS->RAMFS. |
-| `touch <arquivo>` | Cria arquivo vazio no RAMFS. | Valida criação dinâmica de nós no VFS. |
-| `echo <txt> > <arquivo>` | Escreve/sobrescreve conteúdo textual. | Valida caminho de escrita VFS->RAMFS. |
-| `cat > <arquivo> <txt>` | Escrita simplificada via comando `cat`. | Exercita criação/escrita por fluxo alternativo. |
-
-### 📝 Utilitários de Output
-| Comando | Descrição | Comportamento |
-| :--- | :--- | :--- |
-| `echo <txt>` | Imprime a string no buffer VGA. | Validação da rotina de scroll e cursor. |
-
----
-
-## 3. Vetores de Teste de Resiliência (`panic`)
-
-O comando `panic` não é apenas um encerramento; é uma ferramenta de teste para validar se a **IDT (Interrupt Descriptor Table)** está a capturar corretamente as exceções de hardware.
-
-| Subcomando | Exceção Gatilhada | Finalidade do Teste |
-| :--- | :--- | :--- |
-| `panic` | Invocação Direta | Testa o fluxo de halting e dump de registos. |
-| `panic int3` | **#BP** (Breakpoint) | Valida interrupções de depuração. |
-| `panic ud2` | **#UD** (Invalid Opcode) | Testa a reação a código corrompido/malicioso. |
-| `panic div0` | Desativado no 64-bit | Evita `#DE` forçado por comando de teste. |
-| `panic int <n>`| Vetor Genérico | Auditoria de qualquer entrada da IDT via software. |
+Commands are executed directly inside the kernel.
 
 ---
 
-## 4. Cadeia de Custódia de Dados (Input)
+## 2. Purpose
 
-Para garantir que o Shell seja resiliente, o dado percorre o seguinte fluxo:
-1.  **Hardware:** O controlador PS/2 dispara a `IRQ1`.
-2.  **Kernel:** O handler lê a porta `0x60` (Scancode).
-3.  **Abstração:** O tradutor ABNT2 processa modificadores (`Shift`/`Caps`).
-4.  **Interface:** O caractere é enviado para o buffer do Shell, onde aguarda o processamento atómico.
+The diagnostic shell exists primarily to:
+
+- inspect kernel state at runtime;
+- test newly implemented subsystems;
+- validate memory management;
+- inspect scheduler behavior;
+- deliberately trigger controlled failures;
+- test filesystem operations;
+- validate system call infrastructure;
+- assist bare-metal debugging.
+
+It is therefore considered a **kernel development interface**, not a normal userspace command shell.
 
 ---
 
-## 5. Limitações Atuais e Roadmap
+## 3. Basic Commands
 
-### Limitações (Versão Atual):
-* **Execução em Ring 0:** O Shell partilha o espaço de privilégio do Kernel.
-* **Buffer Estático:** Sem suporte para histórico de comandos (Command History).
-* **Parser Simples:** Não suporta argumentos entre aspas ou escapes.
+### `help`
 
-### Evolução Planeada:
-1.  **Isolamento em Ring 3:** Transição do Shell para o Espaço do Utilizador.
-2.  **Syscall Interface:** Toda a comunicação com o hardware passará a ser feita via interrupção `0x80`.
-3.  **Argument Validation:** Implementação de verificação de tipos para comandos como `panic int`.
+Displays the list of available commands.
+
+```text
+help
+```
+
+---
+
+### `clear`
+
+Clears the VGA text-mode screen and resets the cursor.
+
+```text
+clear
+```
+
+---
+
+### `echo`
+
+Writes text directly to the console.
+
+Example:
+
+```text
+echo Hello from CZK
+```
+
+File redirection is also supported in the current RAMFS shell interface:
+
+```text
+echo hello > file.txt
+```
+
+---
+
+## 4. Timer Diagnostics
+
+### `ticks`
+
+Displays information about the kernel timer.
+
+Typical information includes:
+
+- total PIT ticks;
+- elapsed time;
+- timer frequency.
+
+Example:
+
+```text
+ticks
+```
+
+The current CZK_x86 timer normally operates at approximately:
+
+```text
+100 Hz
+```
+
+The PIT timer is also used by the preemptive scheduler and task sleep system.
+
+---
+
+## 5. Task and Scheduler Diagnostics
+
+### `task`
+
+Displays information about the currently executing task and scheduler state.
+
+Depending on the current implementation, this may include:
+
+- current task;
+- task identifier;
+- scheduler switches;
+- timing information.
+
+```text
+task
+```
+
+---
+
+### `ps`
+
+Lists tasks known to the kernel.
+
+The output can include information such as:
+
+```text
+PID
+NAME
+STATE
+BLOCK REASON
+```
+
+Example:
+
+```text
+ps
+```
+
+Possible task states include:
+
+```text
+RUNNING
+READY
+BLOCKED
+ZOMBIE
+```
+
+Blocking reasons currently include mechanisms such as:
+
+```text
+sleep
+event
+```
+
+---
+
+### `schedtest`
+
+Starts the internal scheduler test workload.
+
+```text
+schedtest
+```
+
+The test exercises mechanisms such as:
+
+- preemption;
+- context switching;
+- sleep;
+- wakeup;
+- event blocking;
+- wait queues;
+- `wake_one`;
+- `wake_all`;
+- task termination;
+- zombie cleanup;
+- reaper behavior.
+
+The test workload is not started automatically during a normal kernel boot.
+
+This allows the standard boot path to remain relatively quiet while scheduler stress tests can be explicitly enabled when required.
+
+---
+
+## 6. Physical Memory Diagnostics
+
+### `pmm`
+
+Displays the current state of the Physical Memory Manager.
+
+Typical information includes:
+
+```text
+total frames
+free frames
+```
+
+CZK currently uses physical frames of:
+
+```text
+4 KiB
+```
+
+The PMM obtains available memory regions from the Multiboot2 memory map.
+
+The current implementation manages physical memory up to a configured maximum of approximately:
+
+```text
+512 MiB
+```
+
+---
+
+## 7. Virtual Memory Diagnostics
+
+### `vmm`
+
+Displays information about the Virtual Memory Manager and paging state.
+
+This may include:
+
+- whether paging is enabled;
+- page protection state;
+- CR0.WP state.
+
+```text
+vmm
+```
+
+---
+
+### `wp`
+
+Displays the current state of:
+
+```text
+CR0.WP
+```
+
+Example:
+
+```text
+wp
+```
+
+When enabled, Ring 0 code must also respect read-only page mappings.
+
+This is used by CZK to protect sections such as:
+
+```text
+.text
+.rodata
+```
+
+---
+
+### `nullguard`
+
+Displays information related to the null-page protection mechanism.
+
+Virtual page zero is intentionally left unmapped.
+
+This allows invalid null pointer accesses to generate a page fault instead of silently corrupting memory.
+
+```text
+nullguard
+```
+
+---
+
+### `unmap`
+
+The kernel may expose an `unmap` diagnostic command for controlled virtual-memory testing.
+
+This command is intended for kernel development and should be treated as potentially destructive.
+
+Its exact syntax may evolve together with the VMM implementation.
+
+---
+
+## 8. Kernel Heap Diagnostics
+
+### `kheap`
+
+Displays the current state of the kernel heap.
+
+```text
+kheap
+```
+
+The output may contain statistics related to:
+
+- allocated memory;
+- mapped heap memory;
+- heap usage.
+
+---
+
+### `kmalloc`
+
+Allocates memory from the kernel heap for testing.
+
+Example:
+
+```text
+kmalloc 128
+```
+
+The command can perform a write test on the allocated region and display the resulting address.
+
+This provides a simple runtime validation path for:
+
+```text
+PMM
+ ↓
+VMM
+ ↓
+kernel heap
+ ↓
+kmalloc
+```
+
+---
+
+### `kheapcheck`
+
+Runs an integrity check over the kernel heap.
+
+```text
+kheapcheck
+```
+
+Expected successful output:
+
+```text
+kheapcheck=OK
+```
+
+This command is particularly useful after scheduler tests, task destruction, and repeated dynamic allocations.
+
+---
+
+## 9. VFS and RAMFS Commands
+
+The diagnostic shell provides basic file operations through the VFS layer.
+
+The current filesystem is RAMFS.
+
+---
+
+### `ls`
+
+Lists entries available through the mounted root filesystem.
+
+```text
+ls
+```
+
+---
+
+### `cat`
+
+Reads a file through the VFS.
+
+Example:
+
+```text
+cat file.txt
+```
+
+The normal path is approximately:
+
+```text
+shell
+   ↓
+VFS
+   ↓
+RAMFS
+```
+
+---
+
+### `touch`
+
+Creates an empty file in RAMFS.
+
+Example:
+
+```text
+touch test.txt
+```
+
+---
+
+### Writing Files
+
+A file can be created or overwritten using:
+
+```text
+echo hello > test.txt
+```
+
+A simplified `cat` write path may also be available:
+
+```text
+cat > test.txt hello
+```
+
+These commands are primarily used to validate VFS and RAMFS write operations.
+
+---
+
+## 10. TSS Diagnostics
+
+### `tss`
+
+Displays information related to the currently loaded Task State Segment.
+
+```text
+tss
+```
+
+During CZK_x86 development, the task register has been validated with the selector:
+
+```text
+TR = 0x28
+```
+
+The TSS will become particularly important when Ring 3 execution is introduced because it provides the Ring 0 stack used during privilege transitions.
+
+---
+
+## 11. System Call Diagnostics
+
+### `syscalltest`
+
+Tests the CZK system call path using:
+
+```text
+int 0x80
+```
+
+The test currently validates the complete path:
+
+```text
+software interrupt
+      ↓
+IDT vector 128
+      ↓
+ISR infrastructure
+      ↓
+system call dispatcher
+      ↓
+SYS_WRITE
+      ↓
+return through EAX
+```
+
+A successful test has produced output similar to:
+
+```text
+hello from int 0x80
+return=20
+```
+
+This test currently originates from Ring 0.
+
+Its purpose is to validate the syscall infrastructure before the first actual Ring 3 process begins using it.
+
+---
+
+## 12. Panic and Exception Testing
+
+The shell contains several commands intended to deliberately trigger kernel exception paths.
+
+These commands exist exclusively for testing.
+
+---
+
+### `panic`
+
+Triggers a kernel panic directly.
+
+```text
+panic
+```
+
+---
+
+### `panic int3`
+
+Executes a breakpoint exception:
+
+```text
+#BP
+```
+
+Example:
+
+```text
+panic int3
+```
+
+This validates the IDT and exception handling path.
+
+---
+
+### `panic ud2`
+
+Executes the undefined instruction:
+
+```asm
+ud2
+```
+
+causing:
+
+```text
+#UD — Invalid Opcode
+```
+
+Example:
+
+```text
+panic ud2
+```
+
+---
+
+### `panic null`
+
+Attempts an invalid access through the null page.
+
+The expected result is:
+
+```text
+#PF — Page Fault
+```
+
+This validates the null-page guard.
+
+---
+
+### `panic int <n>`
+
+Allows controlled testing of software interrupt vectors.
+
+Example:
+
+```text
+panic int 3
+```
+
+This command should only be used during kernel testing.
+
+---
+
+### `pfault`
+
+The shell may expose dedicated page-fault testing functionality through:
+
+```text
+pfault
+```
+
+This is intended to exercise the page fault handler under controlled conditions.
+
+Its available modes may evolve as VMM protection testing expands.
+
+---
+
+## 13. Page Fault Diagnostics
+
+When a page fault occurs, CZK can display information such as:
+
+```text
+CR2
+error code
+fault classification
+EIP
+ESP
+EBP
+general-purpose registers
+CS
+EFLAGS
+```
+
+The handler can classify faults including:
+
+```text
+NULL POINTER / INVALID ACCESS
+WRITE TO READ-ONLY PAGE
+NON-PRESENT PAGE
+STACK GUARD ACCESS
+RESERVED PAGE-TABLE BIT
+INSTRUCTION FETCH FAULT
+```
+
+After a fatal page fault, execution normally halts.
+
+---
+
+## 14. Shutdown
+
+### `shutdown`
+
+Attempts to shut down the system.
+
+```text
+shutdown
+```
+
+The current implementation uses a QEMU-specific poweroff mechanism.
+
+Under QEMU, this can terminate the virtual machine.
+
+On physical hardware, this mechanism is not a real ACPI poweroff implementation.
+
+When the QEMU-specific shutdown request is not handled, CZK disables interrupts and enters a permanent halt loop.
+
+Therefore, on bare metal the current behavior is effectively:
+
+```text
+shutdown request
+      ↓
+QEMU-specific port write ignored
+      ↓
+CLI
+      ↓
+HLT loop
+```
+
+Real hardware poweroff through ACPI is planned for a future implementation.
+
+---
+
+## 15. Input Buffer
+
+The shell uses a fixed-size input buffer.
+
+Input exceeding the supported command length is not accepted beyond the configured limit.
+
+This prevents writes beyond the shell command buffer.
+
+The parser remains deliberately simple.
+
+Current limitations include:
+
+- no command history;
+- no advanced line editing;
+- limited quoting;
+- limited escaping;
+- no job control;
+- no userspace processes.
+
+These limitations are acceptable because the shell currently exists primarily as a kernel diagnostic interface.
+
+---
+
+## 16. Ring 0 Execution
+
+The diagnostic shell currently executes with full kernel privileges.
+
+This means shell commands can directly interact with:
+
+```text
+PMM
+VMM
+scheduler
+PIC/PIT
+VFS
+RAMFS
+kernel heap
+exception infrastructure
+```
+
+This architecture is useful during kernel development but is not appropriate for normal application execution.
+
+Cruzeiro OS will eventually provide a separate userspace shell running in Ring 3.
+
+---
+
+## 17. Future Role
+
+The current diagnostic shell is not expected to become the primary Cruzeiro OS userspace shell.
+
+Instead, the long-term model is expected to look approximately like:
+
+```text
+Cruzeiro Kernel
+      │
+      ├── privileged diagnostic shell
+      │
+      └── syscall interface
+               ↓
+           Ring 3
+               ↓
+         userspace shell
+```
+
+The kernel shell may remain available as a low-level debugging environment even after a complete userspace exists.
+
+---
+
+## 18. Current Diagnostic Coverage
+
+Through the shell, CZK can currently exercise or inspect a substantial portion of its kernel architecture:
+
+```text
+PIT / timing
+PIC / IRQ path
+scheduler
+tasks
+sleep
+wait queues
+PMM
+VMM
+paging protection
+kernel heap
+VFS
+RAMFS
+TSS
+system calls
+exceptions
+kernel panic
+```
+
+This makes the shell one of the primary integration-testing interfaces during CZK development.
+
+---
+
+## 19. Development Status
+
+The shell is expected to continue evolving as CZK gains new subsystems.
+
+Future diagnostic commands may cover:
+
+```text
+Ring 3 processes
+process address spaces
+ELF loading
+file descriptors
+persistent storage
+PCI
+ACPI
+networking
+drivers
+```
+
+User-facing commands will eventually move into the Cruzeiro OS userspace instead of being implemented inside the kernel.

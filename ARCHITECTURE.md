@@ -1,25 +1,19 @@
-# Architecture Documentation
+# Architecture
 
-## x86_64 Support
+The architecture documentation for **Cruzeiro Kernel (CZK)** is maintained in:
 
-### 64-bit Boot Sequence
-The 64-bit boot sequence involves...
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
-### IDT64 Initialization
-The initialization of the Interrupt Descriptor Table (IDT64) is crucial...
+The document covers the current state of:
 
-### Syscalls Infrastructure
-The infrastructure for syscalls has been improved to support...
-
-### Timer Hardening against Divide-by-Zero
-Timely hardening measures are taken against divide-by-zero...
-
-### New Shell Commands
-New shell commands have been introduced:
-- **arch**: Display architecture information.
-- **shutdown**: Safely shutdown the system.
-
-### Dual-Architecture Support
-Support for dual architecture is enabled via:
-- **GRUB**: Bootloader configuration for compatibility.
-- **Makefile Targets**: Targets for building both architectures are defined in the Makefile.
+- CZK_x86
+- CZK_x86-64
+- boot and Multiboot2
+- GDT, IDT, ISR, IRQ, PIC and PIT
+- PMM and VMM
+- task scheduling and synchronization
+- FPU and TSS
+- system calls
+- VFS and RAMFS
+- Ring 3 development
+- near-term and long-term roadmap

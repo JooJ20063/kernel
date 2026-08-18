@@ -9,6 +9,8 @@
 #include <kernel/vfs.h>
 #include <kernel/ramfs.h>
 #include <kernel/task.h>
+#include <kernel/syscall.h>
+
 
 #ifdef __x86_64__
 #include <arch/x86_64/irq.h>
@@ -16,6 +18,7 @@
 #else
 #include <arch/x86/irq.h>
 #include <arch/x86/regs.h>
+#include <arch/x86/tss.h>
 #endif
 
 #define SHELL_BUF 128
@@ -622,7 +625,7 @@ static void shell_cmd_krealloc_slot(const char *arg) {
 
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task ps pmm vmm wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic shutdown arch virt mapped unmap schedtest\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
@@ -781,6 +784,16 @@ static void shell_run_command(const char *cmd) {
         sched_demo_init();
         vga_puts("scheduler tests started\n");
         return;
+    } else if (str_eq(cmd, "tss")) {
+    vga_puts("TR=");
+    vga_puthex((uint32_t)tss_get_selector());
+    vga_puts("\n"); 
+    } else if (str_eq(cmd, "syscalltest")) {
+        uint32_t ret = syscall_test_write();
+
+        vga_puts("return=");
+        vga_putdec(ret);
+        vga_puts("\n"); 
     } else if (cmd[0] != 0) {
         klog_warn("unknown command");
     }

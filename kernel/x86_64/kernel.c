@@ -54,12 +54,12 @@ void isr_handler_c(registers_t *r) {
 
 void kernel_main(void) {
     vga_clear();
-    vga_puts("=== Kernel 64 Long Mode ===\n");
+    vga_puts("=== Cruzeiro Kernel - CZK_x86-64 ===\n");
     vga_puts("Welcome to x86_64 kernel!\n");
     vga_puts("arch: x86_64\n");
     vga_puts("Commands: help, clear, arch, shutdown\n\n");
 
-    klog_info("booting kernel64");
+    klog_info("booting Cruzeiro Kernel (CZK_x86-64)");
 
     idt_init();
     idt_install_isrs();
