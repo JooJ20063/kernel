@@ -13,6 +13,8 @@
 #include <kernel/syscall.h>
 #include <kernel/sched.h>
 #include <arch/x86/fpu.h>
+#include <arch/x86/tss.h>
+#include <kernel/version.h>
 
 struct exception_info {
     const char *name;
@@ -71,38 +73,6 @@ static void protect_kernel_ro_sections(void) {
         kernel_panic("failed to protect .rodata", 0);
     }
 }
-
-static void syscall_handler(registers_t *r) {
-    uint32_t syscall_num = r->eax;
-
-    switch (syscall_num) {
-        case SYS_WRITE: { // write
-            int fd = r->ebx;
-            const char *buf = (const char *)r->ecx;
-            uint32_t len = r->edx;
-            if (fd == 1) { // stdout
-                for (uint32_t i = 0; i < len; i++) {
-                    vga_putc(buf[i]);
-                }
-            }
-            r->eax = len; // return written bytes
-            break;
-        }
-        case SYS_EXIT: { // exit
-            vga_puts("Exiting via syscall...\n");
-            asm volatile ("outw %0, %1" : : "a"((uint16_t)0x2000), "Nd"((uint16_t)0x604));
-            asm volatile ("cli");
-            for (;;) {
-                asm volatile ("hlt");
-            }
-            break;
-        }
-        default:
-            r->eax = -1; // error
-            break;
-    }
-}
-
 
 static void page_fault_classify(registers_t *r, uint32_t addr, uint32_t err) {
     vga_puts("Type: ");
@@ -206,7 +176,7 @@ void isr_handler_c(registers_t *r){
 }
     
     if (r->int_no == 128) {
-        syscall_handler(r);
+        (void)syscall_handler(r);
         return;
     }
 
@@ -228,8 +198,9 @@ void kernel_main(uint32_t mb_info_addr) {
    vga_set_color(0x0F, 0x00);
    vga_clear();
 
-   klog_info("booting kernel");
+   klog_info(CZK_NAME " (" CZK_SHORT_NAME "_x86)");
 
+   tss_init();
    idt_init();
    idt_install_isrs();
    idt_install_irqs();

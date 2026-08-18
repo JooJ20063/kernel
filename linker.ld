@@ -18,6 +18,18 @@ SECTIONS
         _rodata_end = .;
     }
 
+    .usertext ALIGN(4K) : {
+        _user_text_start = .;
+        *(.usertext)
+        _user_text_end = .;
+    }
+
+    .userdata ALIGN(4K) : {
+        _user_data_start = .;
+        *(.userdata)
+        _user_data_end = .;
+    }
+
     .data ALIGN(4K) : {
         _data_start = .;
         *(.data*)
