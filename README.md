@@ -1,6 +1,6 @@
 # Cruzeiro Kernel (CZK)
 
-**Cruzeiro Kernel (CZK)** is the kernel of the **Cruzeiro OS** project, an operating system developed from scratch primarily for learning, experimentation and systems programming research.
+**Cruzeiro Kernel (CZK)** is the kernel of the **Cruzeiro OS** project, an operating system developed primarily for learning, experimentation and systems programming research.
 
 The project is written mainly in **C and Assembly** and currently targets the x86 family.
 

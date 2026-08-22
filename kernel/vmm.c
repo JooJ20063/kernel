@@ -124,11 +124,15 @@ int vmm_map_page(uintptr_t virt_addr, uintptr_t phys_addr, uint32_t flags) {
 
     dir_idx = vmm_dir_index(virt_addr);
     table_idx = vmm_table_index(virt_addr);
-    page_flags = VMM_PAGE_PRESENT | (flags & VMM_PAGE_RW);
+    page_flags = VMM_PAGE_PRESENT | (flags & (VMM_PAGE_RW | VMM_PAGE_USER));
 
     table = vmm_ensure_table(dir_idx);
     if (table == 0) {
         return -1;
+    }
+
+    if ((flags & VMM_PAGE_USER) != 0U) {
+        page_directory[dir_idx] |= VMM_PAGE_USER;
     }
 
     table[table_idx] = ((uint32_t)phys_addr & PAGE_FRAME_MASK) | page_flags;

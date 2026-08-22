@@ -27,6 +27,11 @@ extern uint8_t _text_start;
 extern uint8_t _text_end;
 extern uint8_t _rodata_start;
 extern uint8_t _rodata_end;
+extern uint8_t _user_text_start;
+extern uint8_t _user_text_end;
+extern uint8_t _user_data_start;
+extern uint8_t _user_data_end;
+extern uint8_t stack_top;
 
 static const struct exception_info exc[] = {
     {"#DE", "Divide Error"}, {"#DB", "Debug"}, {"NMI", "Non-maskable interrupt"},
@@ -72,6 +77,22 @@ static void protect_kernel_ro_sections(void) {
     if (map_range_flags((uintptr_t)&_rodata_start, (uintptr_t)&_rodata_end, 0) != 0) {
         kernel_panic("failed to protect .rodata", 0);
     }
+}
+
+static void map_user_sections(void) {
+    if (map_range_flags(
+        (uintptr_t)&_user_text_start,
+        (uintptr_t)&_user_text_end,
+        VMM_PAGE_USER) != 0) {
+            kernel_panic("failed to map .usertext", 0);
+        }
+    
+    if (map_range_flags(
+        (uintptr_t)&_user_data_start,
+        (uintptr_t)&_user_data_end,
+        VMM_PAGE_USER | VMM_PAGE_RW) != 0) {
+            kernel_panic("failed to map .userdata", 0);
+        }
 }
 
 static void page_fault_classify(registers_t *r, uint32_t addr, uint32_t err) {
@@ -169,20 +190,20 @@ static void page_fault_handler(registers_t *r) {
     }
 }
 
-void isr_handler_c(registers_t *r){
+
+registers_t *isr_handler_c(registers_t *r) {
     if (r->int_no == 7) {
-    fpu_handle_nm();
-    return;
-}
-    
+        fpu_handle_nm();
+        return r;
+    }
+
     if (r->int_no == 128) {
-        (void)syscall_handler(r);
-        return;
+        return syscall_handler(r);
     }
 
     if (r->int_no == 14) {
         page_fault_handler(r);
-        return;
+        return r;
     }
 
     const char *reason = "Unhandled exception";
@@ -192,6 +213,8 @@ void isr_handler_c(registers_t *r){
     }
 
     kernel_panic(reason, r);
+
+    return r;
 }
 
 void kernel_main(uint32_t mb_info_addr) {
@@ -201,6 +224,7 @@ void kernel_main(uint32_t mb_info_addr) {
    klog_info(CZK_NAME " (" CZK_SHORT_NAME "_x86)");
 
    tss_init();
+   tss_set_kernel_stack((uint32_t)(uintptr_t)&stack_top);
    idt_init();
    idt_install_isrs();
    idt_install_irqs();
@@ -218,6 +242,7 @@ void kernel_main(uint32_t mb_info_addr) {
    pmm_init_from_multiboot(mb_info_addr, (uintptr_t)&_kernel_start, (uintptr_t)&_kernel_end);
    vmm_init();
    protect_kernel_ro_sections();
+   map_user_sections();
    kmalloc_init();
    init_ramfs(0, 0);
 

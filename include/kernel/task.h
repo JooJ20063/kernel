@@ -20,9 +20,11 @@ typedef enum task_block_reason {
 
 typedef struct task_struct {
     uint32_t pid; // Process ID
+    uint32_t parent_pid; // Parent Process ID
     const char *name;
 
     task_state_t state; // Current state of the task
+    int32_t exit_code;
     task_block_reason_t block_reason; // Reason for blocking
     registers_t *context; // CPU context (registers)
     uint32_t wake_tick;
@@ -52,8 +54,14 @@ uint32_t sched_current_task(void);
 uint32_t sched_current_pid(void);
 uint32_t sched_switch_count(void);
 uint32_t sched_task_count(void);
+uint32_t sched_last_exit_pid(void);
+uint32_t sched_current_ppid(void);
+int32_t sched_last_exit_code(void);
+int32_t task_wait_child(int32_t *status);
 
 int sched_create_kernel_task(const char *name, void (*entry)(void));
+int sched_create_user_task(const char *name, void (*entry)(void), uintptr_t user_stack_top);
+
 void sched_demo_init(void);
 
 uint32_t sched_demo_counter_a(void);
@@ -71,11 +79,13 @@ uint32_t sched_event_b_counter(void);
 void sched_dump_tasks(void);
 void task_list_tasks(void);
 void task_sleep_ticks(uint32_t ticks);
+void task_sleep_prepare(uint32_t ticks);
 void wait_queue_init(wait_queue_t *queue);
 int wait_queue_wake_one(wait_queue_t *queue);
 void wait_queue_wake_all(wait_queue_t *queue);
 void task_wait(wait_queue_t *queue);
 void task_yield(void);
+void task_exit_code(int32_t exit_code) __attribute__((noreturn));
 void task_exit(void) __attribute__((noreturn));
 void task_block(void);
 void task_wake(task_t *task);

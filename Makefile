@@ -43,7 +43,8 @@ ASM_SRCS := \
 	boot/isr.s \
 	boot/irq.s \
 	boot/idt_descriptor.s \
-	user/user_test.s
+	user/user_test.s \
+	user/enter_ring3.s 
 
 
 C_OBJS := $(addprefix $(BUILD_DIR)/,$(C_SRCS:.c=.o))
@@ -219,7 +220,9 @@ run: iso
 run64: iso64
 	qemu-system-x86_64 -cdrom $(ISO_IMAGE) -boot d -vga std
 
-
+size: czk_x86.bin
+	ls -la czk_x86.bin
+	size czk_x86.bin
 clean:
 	rm -f \
 		$(KERNEL_X86) \

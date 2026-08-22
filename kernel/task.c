@@ -3,17 +3,22 @@
 #include <kernel/kmalloc.h>
 #include <kernel/vga.h>
 #include <arch/x86/irq.h>
+#include <arch/x86/tss.h>
 
 #define KERNEL_STACK_SIZE   4096
 #define EFLAGS_IF           0x00000202U
 #define KERNEL_CS           0x08U
 #define KERNEL_DS           0x10U
+#define USER_CS             0x1BU
+#define USER_DS             0x23U
 
 static uint32_t quantum = 10; // Default quantum in ticks
 static uint32_t tick_acc = 0;
 static uint32_t switches = 0;
 static uint32_t next_pid = 1; // Start PID from 1
 static uint32_t task_count = 0;
+static uint32_t last_exit_pid = 0;
+static uint32_t last_exit_code = 0;
 
 static uint8_t demo_started = 0;
 
@@ -109,6 +114,20 @@ static void wake_sleeping_tasks(void) {
     } while (t != task_list);
 }
 
+static void update_tss_for_task(task_t *task) {
+    if (task == 0 ||
+        task->kernel_stack == 0 ||
+        task->kernel_stack_size == 0) {
+        return;
+    }
+
+    uint32_t stack_top =
+        (uint32_t)(uintptr_t)task->kernel_stack +
+        task->kernel_stack_size;
+
+    tss_set_kernel_stack(stack_top);
+}
+
 static task_t *pic_next_ready(void) {
     if (current == 0) {
         return 0;
@@ -150,6 +169,7 @@ void sched_init(uint32_t quantum_ticks) {
     mem_zero(&idle_task, sizeof(idle_task));
 
     idle_task.pid = 0;
+    idle_task.parent_pid = 0;
     idle_task.state = TASK_RUNNING;
     idle_task.name = "idle";
     idle_task.context = 0;
@@ -182,6 +202,21 @@ void task_sleep_ticks(uint32_t ticks) {
 
     task_yield();
 }
+
+void task_sleep_prepare(uint32_t ticks) {
+    if (current == 0 || current == &idle_task) {
+        return;
+    }
+
+    if (ticks == 0) {
+        return;
+    }
+
+    current->wake_tick = irq_timer_ticks() + ticks;
+    current->block_reason = TASK_BLOCK_SLEEP;
+    current->state = TASK_BLOCKED;
+}
+
 void task_wait(wait_queue_t *queue) {
     uint32_t flags;
 
@@ -317,6 +352,77 @@ void task_wake(task_t *task) {
     task->state = TASK_READY;
 }
 
+static task_t *find_task_by_pid(uint32_t pid) {
+    if (task_list == 0) {
+        return 0;
+    }
+
+    task_t *t = task_list;
+
+    do {
+        if (t->pid == pid) {
+            return t;
+        }
+
+        t = t->next;
+    } while (t != task_list);
+
+    return 0;
+}
+
+int32_t task_wait_child(int32_t *status) {
+    if (current == 0 || task_list == 0) {
+        return -1;
+    }
+
+    uint32_t parent_pid = current->pid;
+
+    task_t *prev = task_list;
+    task_t *t = task_list->next;
+
+    do {
+        if (t->parent_pid == parent_pid &&
+            t->state == TASK_ZOMBIE &&
+            t != &idle_task &&
+            t != current) {
+
+            uint32_t pid = t->pid;
+            int32_t code = t->exit_code;
+
+            prev->next = t->next;
+
+            if (status != 0) {
+                *status = code;
+            }
+
+            last_exit_pid = pid;
+            last_exit_code = code;
+
+            if (t->fpu_storage != 0) {
+                kfree(t->fpu_storage);
+            }
+
+            if (t->kernel_stack != 0) {
+                kfree(t->kernel_stack);
+            }
+
+            kfree(t);
+
+            if (task_count > 0) {
+                task_count--;
+            }
+
+            return (int32_t)pid;
+        }
+
+        prev = t;
+        t = t->next;
+
+    } while (t != task_list);
+
+    return -1;
+}
+
 static void reap_zombies(void) {
     if (task_list == 0) {
         return;
@@ -325,15 +431,23 @@ static void reap_zombies(void) {
     task_t *prev = task_list;
     task_t *t = task_list->next;
 
+
     do {
+        task_t *parent = find_task_by_pid(t->parent_pid);
+
         if (t->state == TASK_ZOMBIE &&
             t != current &&
-            t != &idle_task) {
+            t != &idle_task &&
+            (parent == 0 ||
+            parent->state == TASK_ZOMBIE)) {
 
             prev->next = t->next;
 
             task_t *dead = t;
             t = t->next;
+
+            last_exit_pid = dead->pid;
+            last_exit_code = dead->exit_code;
 
             if (dead->fpu_storage != 0) {
                 kfree(dead->fpu_storage);
@@ -392,6 +506,7 @@ registers_t *sched_tick_irq(registers_t *regs) {
     current = next;
     switches++;
 
+    update_tss_for_task(next);
     fpu_set_ts();
 
     return next->context;
@@ -419,9 +534,17 @@ registers_t *sched_yield_irq(registers_t *regs) {
     current = next;
     switches++;
 
+    update_tss_for_task(next);
     fpu_set_ts();
 
     return next->context;
+}
+
+uint32_t sched_current_ppid(void){
+    if (current == 0) {
+        return 0;
+    }
+    return current->parent_pid;
 }
 
 int sched_create_kernel_task(const char *name, void (*entry)(void)) {
@@ -460,6 +583,7 @@ int sched_create_kernel_task(const char *name, void (*entry)(void)) {
     frame->eflags = EFLAGS_IF;
 
     task->pid = next_pid++;
+    task->parent_pid = (current != 0) ? current->pid : 0;
     task->name = name;
     task->state = TASK_READY;
     task->context = frame;
@@ -468,6 +592,83 @@ int sched_create_kernel_task(const char *name, void (*entry)(void)) {
     add_task(task);
 
     task->cr3 = 0;
+    fpu_init_task(task);
+
+    return (int)task->pid;
+}
+
+int sched_create_user_task(
+    const char *name,
+    void (*entry)(void),
+    uintptr_t user_stack_top
+) {
+    if (entry == 0 || user_stack_top == 0U) {
+        return -1;
+    }
+
+    task_t *task = (task_t *)kmalloc(sizeof(task_t));
+    if (task == 0) {
+        return -2;
+    }
+
+    uint8_t *stack = (uint8_t *)kmalloc(KERNEL_STACK_SIZE);
+    if (stack == 0) {
+        kfree(task);
+        return -3;
+    }
+
+    mem_zero(task, sizeof(task_t));
+    mem_zero(stack, KERNEL_STACK_SIZE);
+
+    uintptr_t top = (uintptr_t)stack + KERNEL_STACK_SIZE;
+    top -= sizeof(registers_t);
+
+    registers_t *frame = (registers_t *)top;
+    mem_zero(frame, sizeof(registers_t));
+
+    /*
+     * Segmentos restaurados pelo irq_common_stub antes do iret.
+     * Precisam ser seletores DPL3.
+     */
+    frame->gs = USER_DS;
+    frame->fs = USER_DS;
+    frame->es = USER_DS;
+    frame->ds = USER_DS;
+
+    /*
+     * Estado inicial em CPL3.
+     */
+    frame->eip = (uint32_t)(uintptr_t)entry;
+    frame->cs = USER_CS;
+    frame->eflags = EFLAGS_IF;
+
+    /*
+     * Como o iret troca CPL0 -> CPL3, ele também consome
+     * ESP e SS de usuário.
+     */
+    frame->useresp = (uint32_t)user_stack_top;
+    frame->ss = USER_DS;
+
+    task->pid = next_pid++;
+    task->parent_pid = (current != 0) ? current->pid : 0;
+    task->name = name;
+    task->state = TASK_READY;
+    task->context = frame;
+
+    /*
+     * Esta é a kernel stack usada quando uma IRQ/syscall
+     * entra no kernel a partir dessa user task.
+     */
+    task->kernel_stack = stack;
+    task->kernel_stack_size = KERNEL_STACK_SIZE;
+
+    /*
+     * Por enquanto user/kernel compartilham o mesmo CR3.
+     * Depois criaremos address spaces por processo.
+     */
+    task->cr3 = 0;
+
+    add_task(task);
     fpu_init_task(task);
 
     return (int)task->pid;
@@ -601,6 +802,14 @@ uint32_t sched_event_waker_counter(void) {
     return event_waker_counter;
 }
 
+uint32_t sched_last_exit_pid(void) {
+    return last_exit_pid;
+}
+
+int32_t sched_last_exit_code(void) {
+    return last_exit_code;
+}
+
 uint32_t sched_current_task(void) {
     if (current == 0) {
         return 0;
@@ -637,14 +846,17 @@ void task_list_tasks(void) {
         return;
     }
 
-    vga_puts("PID   Name          State     Stack\n");
-    vga_puts("------------------------------------------\n");
-
+    vga_puts("PID   PPID   Name          State     Stack\n");
+    vga_puts("-------------------------------------------------\n");
+    
     task_t *t = task_list;
 
     do {
         vga_putdec(t->pid);
         vga_puts("   ");
+        vga_putdec(t->parent_pid);
+        vga_puts("   ");
+
 
         if (t->name != 0) {
             vga_puts(t->name);
@@ -677,8 +889,9 @@ void task_yield(void) {
     asm volatile ("int $0x81");
 }
 
-void task_exit(void) {
+void task_exit_code(int32_t code) {
     if (current != 0) {
+        current->exit_code = code;
         current->block_reason = TASK_BLOCK_NONE;
         current->wake_tick = 0;
         current->state = TASK_ZOMBIE;
@@ -687,6 +900,10 @@ void task_exit(void) {
     for (;;) {
         task_yield();
     }
+}
+
+void task_exit(void) {
+    task_exit_code(0);
 }
 
 task_t *sched_current_task_ptr(void) {

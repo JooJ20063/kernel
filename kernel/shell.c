@@ -21,6 +21,12 @@
 #include <arch/x86/tss.h>
 #endif
 
+#ifndef __x86_64__
+extern void user_test_entry(void);
+extern uint8_t user_stack_top;
+extern void enter_ring3(uint32_t entry, uint32_t user_stack);
+#endif
+
 #define SHELL_BUF 128
 #define KHEAP_SLOTS 16
 
@@ -625,7 +631,7 @@ static void shell_cmd_krealloc_slot(const char *arg) {
 
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task ps pmm vmm wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test lastexit waittest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
@@ -647,41 +653,41 @@ static void shell_run_command(const char *cmd) {
         vga_putdec(irq_timer_hz());
         vga_puts("\n");
     } else if (str_eq(cmd, "task")) {
-    vga_puts("current pid=");
-    vga_putdec(sched_current_pid());
+        vga_puts("current pid=");
+        vga_putdec(sched_current_pid());
 
-    vga_puts(" tasks=\n");
-    vga_putdec(sched_task_count());
+        vga_puts(" tasks=\n");
+        vga_putdec(sched_task_count());
 
-    vga_puts(" switches=\n");
-    vga_putdec(sched_switch_count());
+        vga_puts(" switches=\n");
+        vga_putdec(sched_switch_count());
 
-    vga_puts(" demoA=\n");
-    vga_putdec(sched_demo_counter_a());
+        vga_puts(" demoA=\n");
+        vga_putdec(sched_demo_counter_a());
 
-    vga_puts(" demoB=");
-    vga_putdec(sched_demo_counter_b());
+        vga_puts(" demoB=");
+        vga_putdec(sched_demo_counter_b());
 
-    vga_puts(" sseA=");
-    vga_putdec((uint32_t)sched_sse_value_a());
+        vga_puts(" sseA=");
+        vga_putdec((uint32_t)sched_sse_value_a());
 
-    vga_puts(" sseB=");
-    vga_putdec((uint32_t)sched_sse_value_b());
-    
-    vga_puts(" sleep=");
-    vga_putdec(sched_sleep_demo_counter());
+        vga_puts(" sseB=");
+        vga_putdec((uint32_t)sched_sse_value_b());
 
-    vga_puts(" evA=");
-    vga_putdec(sched_event_a_counter());
+        vga_puts(" sleep=");
+        vga_putdec(sched_sleep_demo_counter());
 
-    vga_puts(" evB=");
-    vga_putdec(sched_event_b_counter());
+        vga_puts(" evA=");
+        vga_putdec(sched_event_a_counter());
 
-    vga_puts(" wake=");
-    vga_putdec(sched_event_waker_counter());
+        vga_puts(" evB=");
+        vga_putdec(sched_event_b_counter());
 
-    vga_puts("\n");
-} else if (str_eq(cmd, "pmm")) {
+        vga_puts(" wake=");
+        vga_putdec(sched_event_waker_counter());
+
+        vga_puts("\n");
+    } else if (str_eq(cmd, "pmm")) {
         vga_puts("frames total=");
         vga_putdec(pmm_total_frame_count());
         vga_puts(" free=");
@@ -765,18 +771,26 @@ static void shell_run_command(const char *cmd) {
     } else if (str_eq(cmd, "panic") || str_starts(cmd, "panic ")) {
         shell_cmd_panic(cmd[5] ? cmd + 6 : 0);
     } else if (str_eq(cmd, "pfault") || str_starts(cmd, "pfault ")) {
-    shell_cmd_pfault(cmd[6] ? skip_spaces(cmd + 7) : 0);
-} else if (str_eq(cmd, "kheapcheck")) {
-    vga_puts("kheapcheck=");
-    vga_puts(kheap_check() ? "OK" : "CORRUPT");
-    vga_puts("\n"); 
+        shell_cmd_pfault(cmd[6] ? skip_spaces(cmd + 7) : 0);
+    } else if (str_eq(cmd, "kheapcheck")) {
+        vga_puts("kheapcheck=");
+        vga_puts(kheap_check() ? "OK" : "CORRUPT");
+        vga_puts("\n");
     } else if (str_eq(cmd, "ps")) {
         task_list_tasks();
     } else if (str_eq(cmd, "shutdown")) {
         vga_puts("Shutting down...\n");
+
         /* Signal QEMU to shutdown */
-        asm volatile ("outw %0, %1" : : "a"((uint16_t)0x2000), "Nd"((uint16_t)0x604));
+        asm volatile (
+            "outw %0, %1"
+            :
+            : "a"((uint16_t)0x2000),
+              "Nd"((uint16_t)0x604)
+        );
+
         asm volatile ("cli");
+
         for (;;) {
             asm volatile ("hlt");
         }
@@ -785,19 +799,60 @@ static void shell_run_command(const char *cmd) {
         vga_puts("scheduler tests started\n");
         return;
     } else if (str_eq(cmd, "tss")) {
-    vga_puts("TR=");
-    vga_puthex((uint32_t)tss_get_selector());
-    vga_puts("\n"); 
+        vga_puts("TR=");
+        vga_puthex((uint32_t)tss_get_selector());
+        vga_puts("\n");
     } else if (str_eq(cmd, "syscalltest")) {
         uint32_t ret = syscall_test_write();
 
         vga_puts("return=");
         vga_putdec(ret);
-        vga_puts("\n"); 
-    } else if (cmd[0] != 0) {
+        vga_puts("\n");
+
+#ifndef __x86_64__
+    } else if (str_eq(cmd, "ring3test")) {
+        int pid;
+
+        pid = sched_create_user_task(
+            "ring3-test",
+            user_test_entry,
+            (uintptr_t)&user_stack_top
+        );
+
+        if (pid < 0) {
+            klog_warn("failed to create Ring 3 task");
+            return;
+        }
+
+        vga_puts("Ring 3 task created pid=");
+        vga_putdec((uint32_t)pid);
+        vga_puts("\n");
+#endif
+    } else if (str_eq(cmd, "lastexit")) {
+        vga_puts("last exit: pid=");
+        vga_putdec(sched_last_exit_pid());
+
+        vga_puts(" code=");
+        vga_putdec((uint32_t)sched_last_exit_code());
+
+        vga_puts("\n");    
+    } else if (str_eq(cmd, "waittest")) {
+    int32_t status = 0;
+    int32_t pid = task_wait_child(&status);
+
+    if (pid < 0) {
+        vga_puts("wait: no zombie child\n");
+    } else {
+        vga_puts("wait: pid=");
+        vga_putdec((uint32_t)pid);
+
+        vga_puts(" code=");
+        vga_putdec((uint32_t)status);
+
+        vga_puts("\n");
+    } } else if (cmd[0] != 0) {
         klog_warn("unknown command");
     }
-
 }
 
 void shell_init(void) {

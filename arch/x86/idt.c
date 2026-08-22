@@ -98,7 +98,7 @@ void idt_install_isrs(void) {
     idt_set_gate(29, (uint32_t)isr29, 0x8E);
     idt_set_gate(30, (uint32_t)isr30, 0x8E);
     idt_set_gate(31, (uint32_t)isr31, 0x8E);
-    idt_set_gate(128, (uint32_t)isr128, 0x8E);
+    idt_set_gate(128, (uint32_t)isr128, 0xEE);
 }
 
 extern void irq0();
@@ -137,5 +137,5 @@ void idt_install_irqs(void) {
     idt_set_gate(46, (uint32_t)irq14, 0x8E);
     idt_set_gate(47, (uint32_t)irq15, 0x8E);
 
-    idt_set_gate(129, (uint32_t)irq_yield, 0xEE);
+    idt_set_gate(129, (uint32_t)irq_yield, 0x8E);
 }

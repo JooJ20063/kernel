@@ -79,6 +79,11 @@ isr_common_stub:
     call isr_handler_c
     add $4, %esp
 
+    test %eax, %eax
+    jz 1f
+    mov %eax, %esp
+1:
+
     pop %gs
     pop %fs
     pop %es
