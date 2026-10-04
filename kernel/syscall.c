@@ -51,13 +51,14 @@ registers_t *syscall_handler(registers_t *regs) {
             regs->eax = 0;
             return sched_yield_irq(regs);
         
-        case SYS_WAIT:
+        case SYS_WAIT: {
             int32_t status = 0;
             int32_t pid = task_wait_child(&status);
-            
-            regs->eax = (uint32_t)regs->eax;
-            regs->edx = (uint32_t)regs->edx;
+
+            regs->eax = (uint32_t)pid;
+            regs->edx = (uint32_t)status;
             break;
+        }
 
         default:
             regs->eax = 0xFFFFFFFFU;
