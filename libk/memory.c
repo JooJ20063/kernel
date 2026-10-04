@@ -21,3 +21,28 @@ void *memcpy(void *dest, const void *src, size_t count) {
 
     return dest;
 }
+
+
+void *memmove(void *dest, const void *src, size_t count) {
+    unsigned char *dst = (unsigned char *)dest;
+    const unsigned char *source = (const unsigned char *)src;
+
+    if (dst == source || count == 0) {
+        return dest;
+    }
+
+    if (dst < source) {
+        while (count-- > 0) {
+            *dst++ = *source++;
+        }
+    } else {
+        dst += count;
+        source += count;
+
+        while (count-- > 0) {
+            *--dst = *--source;
+        }
+    }
+
+    return dest;
+}
