@@ -186,8 +186,14 @@ static int heap_slot_valid(uint32_t slot) {
     return (slot < KHEAP_SLOTS && heap_slots[slot] != 0);
 }
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winfinite-recursion"
+__attribute__((noinline, noreturn, disable_tail_calls))
+#else
 __attribute__((noinline, noreturn))
-static void force_stack_overflow(uint32_t depth){
+#endif
+static void force_stack_overflow(uint32_t depth) {
 
     volatile uint8_t buffer[4096];
 
@@ -198,6 +204,10 @@ static void force_stack_overflow(uint32_t depth){
 
     force_stack_overflow(depth + 1);
 }
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 static void shell_cmd_pfault(const char *arg) {
     if (arg == 0 || *arg ==0){
