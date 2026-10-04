@@ -46,3 +46,20 @@ void *memmove(void *dest, const void *src, size_t count) {
 
     return dest;
 }
+
+
+int memcmp(const void *lhs, const void *rhs, size_t count) {
+    const unsigned char *left = (const unsigned char *)lhs;
+    const unsigned char *right = (const unsigned char *)rhs;
+
+    while (count-- > 0) {
+        if (*left != *right) {
+            return (int)*left - (int)*right;
+        }
+
+        left++;
+        right++;
+    }
+
+    return 0;
+}
