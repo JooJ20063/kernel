@@ -54,6 +54,7 @@ static void pit_set_frequency(uint32_t hz) {
 static void print_irq_status(void) {
     uint16_t cursor_before = vga_get_cursor_pos();
 
+    vga_set_serial_mirror(0);
     vga_write_at(80 * 24, "TIMER: ");
     vga_putdec(timer_seconds);
     vga_puts("s HZ=");
@@ -65,6 +66,7 @@ static void print_irq_status(void) {
     vga_puts("   ");
 
     vga_set_cursor_pos(cursor_before);
+    vga_set_serial_mirror(1);
 }
 
 
