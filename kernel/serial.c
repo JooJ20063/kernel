@@ -45,6 +45,7 @@ void serial_init(void) {
     }
 
     outb(COM1_BASE + UART_MODEM_CTRL, 0x0B);
+    outb(COM1_BASE + UART_IER, 0x01);
     serial_available = 1;
 }
 
