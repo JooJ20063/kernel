@@ -4,6 +4,7 @@
 #include <kernel/sched.h>
 #include <kernel/shell.h>
 #include <kernel/task.h>
+#include <kernel/serial.h>
 #include <arch/x86/fpu.h>
 
 
@@ -160,6 +161,20 @@ static void keyboard_irq(void) {
     }
 }
 
+static void serial_irq(void) {
+    while (serial_rx_ready()) {
+        char c = serial_getc();
+
+        if (c == '\r') {
+            c = '\n';
+        } else if (c == 0x7F) {
+            c = '\b';
+        }
+
+        shell_on_key(c);
+    }
+}
+
 void irq_init(uint32_t timer_hz, uint32_t scheduler_quantum_ticks) {
     pit_set_frequency(timer_hz);
     sched_init(scheduler_quantum_ticks);
@@ -211,6 +226,9 @@ registers_t *irq_handler_c(registers_t *regs) {
             return regs;
         case 1:
             keyboard_irq();
+            break;
+        case 4:
+            serial_irq();
             break;
         default:
             break;
