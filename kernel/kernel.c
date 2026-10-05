@@ -238,6 +238,7 @@ void kernel_main(uint32_t mb_info_addr) {
    pic_unmask_irq(0); /* timer */
    pic_unmask_irq(1); /* keyboard */
    if (serial_is_available()) {
+       serial_enable_rx_interrupt();
        pic_unmask_irq(4); /* COM1 */
    }
 
