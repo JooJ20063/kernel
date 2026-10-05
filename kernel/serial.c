@@ -45,12 +45,19 @@ void serial_init(void) {
     }
 
     outb(COM1_BASE + UART_MODEM_CTRL, 0x0B);
-    outb(COM1_BASE + UART_IER, 0x01);
     serial_available = 1;
 }
 
 int serial_is_available(void) {
     return serial_available;
+}
+
+void serial_enable_rx_interrupt(void) {
+    if (!serial_available) {
+        return;
+    }
+
+    outb(COM1_BASE + UART_IER, 0x01);
 }
 
 void serial_putc(char c) {
