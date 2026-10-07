@@ -1,4 +1,5 @@
 #include <kernel/devfs.h>
+#include <kernel/tty.h>
 
 static fs_node_t devfs_root_node;
 static fs_node_t devfs_null_node;
@@ -93,6 +94,10 @@ static fs_node_t *devfs_readdir(fs_node_t *node, uint32_t index) {
         return &devfs_zero_node;
     }
 
+    if (index == 2U) {
+        return tty1_node();
+    }
+
     return 0;
 }
 
@@ -107,6 +112,10 @@ static fs_node_t *devfs_finddir(fs_node_t *node, const char *name) {
 
     if (str_eq(name, "zero")) {
         return &devfs_zero_node;
+    }
+
+    if (str_eq(name, "tty1")) {
+        return tty1_node();
     }
 
     return 0;
@@ -156,6 +165,8 @@ int devfs_init(void) {
         "zero",
         devfs_zero_read
     );
+
+    tty1_init();
 
     return vfs_mount("/dev", &devfs_root_node);
 }
