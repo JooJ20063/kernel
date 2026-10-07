@@ -45,7 +45,7 @@ static int syscall_copy_string_vector(
         return 0;
     }
 
-    for (uint32_t i = 0U; i < max_count; ++i) {
+    for (uint32_t i = 0U; i <= max_count; ++i) {
         uint32_t user_string = 0U;
         int copy_result;
 
@@ -62,6 +62,10 @@ static int syscall_copy_string_vector(
         if (user_string == 0U) {
             *count_out = i;
             return 0;
+        }
+
+        if (i == max_count) {
+            return -3;
         }
 
         copy_result = copy_string_from_user(
