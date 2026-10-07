@@ -906,6 +906,20 @@ void task_exit(void) {
     task_exit_code(0);
 }
 
+registers_t *task_exit_from_exception(registers_t *regs, int32_t exit_code) {
+    if (current == 0 || current == &idle_task || regs == 0) {
+        return regs;
+    }
+
+    current->context = regs;
+    current->exit_code = exit_code;
+    current->block_reason = TASK_BLOCK_NONE;
+    current->wake_tick = 0;
+    current->state = TASK_ZOMBIE;
+
+    return sched_yield_irq(regs);
+}
+
 task_t *sched_current_task_ptr(void) {
     return current;
 }
