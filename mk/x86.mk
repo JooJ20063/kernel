@@ -9,6 +9,15 @@ ASFLAGS ?= --32
 LDFLAGS ?= -m elf_i386 -T arch/x86/linker.ld
 DEPFLAGS := -MMD -MP
 
+USER_ELF_DIR := $(BUILD_DIR)/userspace
+USER_HELLO_OBJ := $(USER_ELF_DIR)/hello.o
+USER_HELLO := $(USER_ELF_DIR)/hello
+INITRD_ROOT := $(BUILD_DIR)/initrd-root
+INITRD_IMAGE := $(BUILD_DIR)/initrd.tar
+USER_CFLAGS := -m32 -ffreestanding -Wall -Wextra -Werror \\
+	-fno-pic -fno-pie -fno-stack-protector \\
+	-fno-asynchronous-unwind-tables -fno-unwind-tables
+
 C_SRCS := \
 	libk/memory.c \
 	drivers/console/serial_16550.c \
@@ -60,5 +69,18 @@ $(BUILD_DIR)/%.o: %.c
 $(BUILD_DIR)/%.o: %.s
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) $< -o $@
+
+$(USER_HELLO_OBJ): tests/elf/hello.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(USER_HELLO): $(USER_HELLO_OBJ) tests/elf/user.ld
+	$(LD) -m elf_i386 -T tests/elf/user.ld -o $@ $(USER_HELLO_OBJ)
+
+$(INITRD_IMAGE): $(USER_HELLO)
+	rm -rf $(INITRD_ROOT)
+	mkdir -p $(INITRD_ROOT)/bin
+	cp $(USER_HELLO) $(INITRD_ROOT)/bin/hello
+	tar --format=ustar -C $(INITRD_ROOT) -cf $@ bin/hello
 
 -include $(DEPS)
