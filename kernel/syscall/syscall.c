@@ -2,6 +2,7 @@
 #include <kernel/vga.h>
 #include <kernel/task.h>
 #include <kernel/sched.h>
+#include <kernel/uaccess.h>
 
 registers_t *syscall_handler(registers_t *regs) {
     if (regs == 0) {
@@ -13,17 +14,41 @@ registers_t *syscall_handler(registers_t *regs) {
             uint32_t fd = regs->ebx;
             const char *buf = (const char *)(uintptr_t)regs->ecx;
             uint32_t len = regs->edx;
+            uint32_t offset = 0U;
+            char kernel_buf[128];
 
-            if (fd != 1 || buf == 0) {
+            if (fd != 1U) {
                 regs->eax = 0xFFFFFFFFU;
                 break;
             }
 
-            for (uint32_t i = 0; i < len; i++) {
-                vga_putc(buf[i]);
+            while (offset < len) {
+                uint32_t remaining = len - offset;
+                uint32_t chunk = remaining;
+
+                if (chunk > (uint32_t)sizeof(kernel_buf)) {
+                    chunk = (uint32_t)sizeof(kernel_buf);
+                }
+
+                if (copy_from_user(
+                        kernel_buf,
+                        (const void *)((uintptr_t)buf + offset),
+                        chunk) != 0) {
+                    regs->eax = 0xFFFFFFFFU;
+                    break;
+                }
+
+                for (uint32_t i = 0; i < chunk; ++i) {
+                    vga_putc(kernel_buf[i]);
+                }
+
+                offset += chunk;
             }
 
-            regs->eax = len;
+            if (offset == len) {
+                regs->eax = len;
+            }
+
             break;
         }
 
