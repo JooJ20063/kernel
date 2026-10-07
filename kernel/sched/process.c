@@ -1,5 +1,6 @@
 #include <kernel/process.h>
 #include <kernel/kmalloc.h>
+#include <kernel/vmm.h>
 
 static uint32_t next_pid = 1U;
 
@@ -63,5 +64,6 @@ void process_destroy(process_t *process) {
     }
 
     fd_table_close_all(&process->fds);
+    vmm_destroy_address_space(process->cr3);
     kfree(process);
 }

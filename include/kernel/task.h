@@ -45,6 +45,7 @@ typedef struct wait_queue {
 } wait_queue_t;
 
 void sched_init(uint32_t quantum_ticks);
+void sched_set_bootstrap_address_space(uint32_t cr3);
 registers_t *sched_tick_irq(registers_t *regs);
 registers_t *sched_yield_irq(registers_t *regs);
 

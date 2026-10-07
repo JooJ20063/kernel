@@ -440,6 +440,38 @@ user_gp_test_entry:
     jmp 1b
 
 
+.global user_aspace_test_entry
+user_aspace_test_entry:
+    cmpl $0, aspace_private_word
+    jne aspace_test_failed
+
+    movl $0xA5A5A5A5, aspace_private_word
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $aspace_ok_message, %ecx
+    mov $(aspace_ok_message_end-aspace_ok_message), %edx
+    int $0x80
+
+    mov $2, %eax
+    xor %ebx, %ebx
+    int $0x80
+
+aspace_test_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $aspace_fail_message, %ecx
+    mov $(aspace_fail_message_end-aspace_fail_message), %edx
+    int $0x80
+
+    mov $2, %eax
+    mov $1, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
 .global user_fault_test_entry
 user_fault_test_entry:
     # Announce the deliberate fault through the normal syscall path.
@@ -485,6 +517,18 @@ ud_test_message_end:
 gp_test_message:
     .ascii "ring3gp: executing privileged CLI\n"
 gp_test_message_end:
+
+aspace_ok_message:
+    .ascii "aspace: private userdata ok\n"
+aspace_ok_message_end:
+
+aspace_fail_message:
+    .ascii "aspace: private userdata FAILED\n"
+aspace_fail_message_end:
+
+.align 4
+aspace_private_word:
+    .long 0
 
 uaccess_ok:
     .ascii "uaccess: kernel pointer rejected\n"

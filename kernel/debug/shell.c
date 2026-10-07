@@ -27,6 +27,7 @@ extern void user_test_entry(void);
 extern void user_fault_test_entry(void);
 extern void user_ud_test_entry(void);
 extern void user_gp_test_entry(void);
+extern void user_aspace_test_entry(void);
 extern uint8_t user_stack_top;
 extern void enter_ring3(uint32_t entry, uint32_t user_stack);
 #endif
@@ -715,6 +716,12 @@ static void shell_run_command(const char *cmd) {
         vga_puts(vmm_is_enabled() ? "ON" : "OFF");
         vga_puts(" wp=");
         vga_puts(vmm_wp_is_enabled() ? "ON" : "OFF");
+        vga_puts(" cr3=");
+        vga_puthex(vmm_current_cr3());
+        vga_puts(" kernel=");
+        vga_puthex(vmm_kernel_cr3());
+        vga_puts(" spaces=");
+        vga_putdec(vmm_address_space_count());
         vga_puts("\n");
     } else if (str_eq(cmd, "wp")) {
         vga_puts("CR0.WP=");
@@ -890,6 +897,28 @@ static void shell_run_command(const char *cmd) {
 
         vga_puts("Ring 3 GP task created pid=");
         vga_putdec((uint32_t)pid);
+        vga_puts("\n");
+    } else if (str_eq(cmd, "ring3as")) {
+        int first = sched_create_user_task(
+            "ring3-as-a",
+            user_aspace_test_entry,
+            (uintptr_t)&user_stack_top
+        );
+        int second = sched_create_user_task(
+            "ring3-as-b",
+            user_aspace_test_entry,
+            (uintptr_t)&user_stack_top
+        );
+
+        if (first < 0 || second < 0) {
+            klog_warn("failed to create address-space test tasks");
+            return;
+        }
+
+        vga_puts("Ring 3 address-space tasks created pids=");
+        vga_putdec((uint32_t)first);
+        vga_puts(",");
+        vga_putdec((uint32_t)second);
         vga_puts("\n");
 #endif
     } else if (str_eq(cmd, "lastexit")) {
