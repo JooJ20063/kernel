@@ -121,6 +121,19 @@ static void timer_irq(void) {
     }
 }
 
+static void input_route_char(char c) {
+    if (tty1_input_focus() == TTY_INPUT_FOCUS_TTY1) {
+        tty1_receive_char(c);
+    } else {
+        shell_on_key(c);
+    }
+}
+
+static void input_return_to_kernel_shell(void) {
+    tty1_set_input_focus(TTY_INPUT_FOCUS_SHELL);
+    shell_resume_input();
+}
+
 static void keyboard_irq(void) {
     uint8_t scancode;
 
@@ -142,26 +155,33 @@ static void keyboard_irq(void) {
         kbd_caps ^= 1;
         return;
     }
+    /*
+     * F12 is an out-of-band escape from tty1 focus back to the kernel
+     * diagnostic shell. Its break code is ignored by the generic path.
+     */
+    if (scancode == 0x58 &&
+        tty1_input_focus() == TTY_INPUT_FOCUS_TTY1) {
+        input_return_to_kernel_shell();
+        return;
+    }
+
     if (scancode & 0x80) {
         return;
     }
 
     if (scancode == 0x1C) {
-        tty1_receive_char('\n');
-        shell_on_key('\n');
+        input_route_char('\n');
         return;
     }
 
     if (scancode == 0x0E) {
-        tty1_receive_char('\b');
-        shell_on_key('\b');
+        input_route_char('\b');
         return;
     }
 
     char c = kbd_translate_abnt2(scancode, kbd_shift, kbd_caps);
     if (c != 0) {
-        tty1_receive_char(c);
-        shell_on_key(c);
+        input_route_char(c);
     }
 }
 
@@ -175,8 +195,16 @@ static void serial_irq(void) {
             c = '\b';
         }
 
-        tty1_receive_char(c);
-        shell_on_key(c);
+        /*
+         * Ctrl+] (0x1D) is the serial equivalent of the F12 escape.
+         */
+        if ((uint8_t)c == 0x1DU &&
+            tty1_input_focus() == TTY_INPUT_FOCUS_TTY1) {
+            input_return_to_kernel_shell();
+            continue;
+        }
+
+        input_route_char(c);
     }
 }
 
