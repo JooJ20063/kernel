@@ -19,6 +19,7 @@
 #include <kernel/serial.h>
 #include <kernel/fd.h>
 #include <kernel/vfs.h>
+#include <kernel/multiboot2.h>
 
 struct exception_info {
     const char *name;
@@ -59,6 +60,45 @@ static const struct exception_info exc[] = {
 
 #define KERNEL_STACK_LOW  0x00118000U
 #define KERNEL_STACK_HIGH 0x0011C000U
+
+static int multiboot2_first_module(
+    uint32_t mb_info_addr,
+    uintptr_t *start_out,
+    uintptr_t *end_out
+) {
+    uint32_t total_size;
+    uintptr_t info_end;
+    struct multiboot2_tag *tag;
+
+    if (mb_info_addr == 0U || start_out == 0 || end_out == 0) {
+        return -1;
+    }
+
+    total_size = *(uint32_t *)(uintptr_t)mb_info_addr;
+    info_end = (uintptr_t)mb_info_addr + (uintptr_t)total_size;
+    tag = (struct multiboot2_tag *)((uintptr_t)mb_info_addr + 8U);
+
+    while ((uintptr_t)tag < info_end &&
+           tag->type != MULTIBOOT2_TAG_END) {
+        if (tag->type == MULTIBOOT2_TAG_MODULE) {
+            struct multiboot2_tag_module *module =
+                (struct multiboot2_tag_module *)tag;
+
+            if (module->mod_end > module->mod_start) {
+                *start_out = (uintptr_t)module->mod_start;
+                *end_out = (uintptr_t)module->mod_end;
+                return 0;
+            }
+        }
+
+        tag = (struct multiboot2_tag *)(
+            ((uintptr_t)tag + tag->size + 7U) &
+            ~(uintptr_t)7U
+        );
+    }
+
+    return -1;
+}
 
 static int map_range_flags(uintptr_t start, uintptr_t end, uint32_t flags) {
     uintptr_t page_start = start & ~(uintptr_t)0xFFFU;
@@ -293,6 +333,9 @@ registers_t *isr_handler_c(registers_t *r) {
 }
 
 void kernel_main(uint32_t mb_info_addr) {
+   uintptr_t initrd_phys_start = 0U;
+   uintptr_t initrd_phys_end = 0U;
+
    serial_init();
 
    vga_set_color(0x0F, 0x00);
@@ -320,13 +363,48 @@ void kernel_main(uint32_t mb_info_addr) {
 
     fpu_init();
 
+   (void)multiboot2_first_module(
+       mb_info_addr,
+       &initrd_phys_start,
+       &initrd_phys_end
+   );
+
    pmm_init_from_multiboot(mb_info_addr, (uintptr_t)&_kernel_start, (uintptr_t)&_kernel_end);
    vmm_init();
    sched_set_bootstrap_address_space(vmm_kernel_cr3());
    protect_kernel_ro_sections();
    map_user_sections();
    kmalloc_init();
-   init_ramfs(0, 0);
+
+   if (initrd_phys_end > initrd_phys_start) {
+       uint32_t initrd_size =
+           (uint32_t)(initrd_phys_end - initrd_phys_start);
+       uint8_t *initrd_copy =
+           (uint8_t *)kmalloc(initrd_size);
+
+       if (initrd_copy == 0) {
+           kernel_panic("failed to allocate initrd copy", 0);
+       }
+
+       if (vmm_copy_from_phys(
+               initrd_copy,
+               initrd_phys_start,
+               initrd_size) != 0) {
+           kernel_panic("failed to copy initrd module", 0);
+       }
+
+       /*
+        * RAMFS tar entries point into this buffer, so it intentionally
+        * remains allocated for the lifetime of the initial filesystem.
+        */
+       init_ramfs(
+           (uintptr_t)initrd_copy,
+           (uintptr_t)initrd_copy + initrd_size
+       );
+   } else {
+       init_ramfs(0, 0);
+   }
+
    if (devfs_init() != 0) {
        kernel_panic("failed to mount devfs", 0);
    }
