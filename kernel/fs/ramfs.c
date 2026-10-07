@@ -156,6 +156,10 @@ static uint32_t ramfs_write(fs_node_t *node, uint32_t offset, uint32_t size, con
         return 0;
     }
 
+    if (size > 0xFFFFFFFFU - offset) {
+        return 0;
+    }
+
     need = offset + size;
 
     if (need > entry->capacity) {
