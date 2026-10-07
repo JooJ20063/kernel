@@ -169,7 +169,7 @@ fd_table_test_done:
     test %eax, %eax
     jne fileio_test_failed
 
-    cmp $(fileio_payload_end-fileio_payload), fileio_stat
+    cmpl $(fileio_payload_end-fileio_payload), fileio_stat
     jne fileio_test_failed
 
     # read(fd, buffer, payload_len)
