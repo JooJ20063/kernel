@@ -237,7 +237,7 @@ static fs_node_t *ramfs_add_writable_file(const char *name) {
     mem_zero(data, RAMFS_NEW_FILE_CAPACITY);
 
     str_copy_limit(entry->node.name, name, sizeof(entry->node.name));
-    entry->node.flags = FS_FILE;
+    entry->node.flags = FS_FILE | FS_WRITABLE;
     entry->node.size = 0;
     entry->node.read = ramfs_read;
     entry->node.write = ramfs_write;
