@@ -17,6 +17,8 @@
 #include <arch/x86/tss.h>
 #include <kernel/version.h>
 #include <kernel/serial.h>
+#include <kernel/fd.h>
+#include <kernel/vfs.h>
 
 struct exception_info {
     const char *name;
@@ -327,6 +329,17 @@ void kernel_main(uint32_t mb_info_addr) {
    init_ramfs(0, 0);
    if (devfs_init() != 0) {
        kernel_panic("failed to mount devfs", 0);
+   }
+
+   {
+       process_t *bootstrap = sched_current_process_ptr();
+       fs_node_t *tty = vfs_resolve("/dev/tty1");
+
+       if (bootstrap == 0 ||
+           tty == 0 ||
+           fd_table_bind_stdio(&bootstrap->fds, tty) != 0) {
+           kernel_panic("failed to bind bootstrap stdio", 0);
+       }
    }
 
    klog_info("interrupts configured");
