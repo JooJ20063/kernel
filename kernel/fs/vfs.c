@@ -174,6 +174,13 @@ fs_node_t *create_fs(fs_node_t *node, const char *name, uint32_t flags) {
     return node->create(node, name, flags);
 }
 
+int remove_fs(fs_node_t *node, const char *name) {
+    if (node == 0 || name == 0 || node->remove == 0) {
+        return -1;
+    }
+    return node->remove(node, name);
+}
+
 void vfs_set_root(fs_node_t *root) {
     vfs_root_node = root;
     vfs_mounts_used = 0U;
@@ -288,6 +295,30 @@ fs_node_t *vfs_create(const char *path, uint32_t flags) {
     }
 
     return create_fs(parent, name, flags);
+}
+
+int vfs_remove(const char *path) {
+    fs_node_t *parent;
+    fs_node_t *target;
+    char name[VFS_NAME_MAX];
+
+    if (vfs_resolve_parent(path, &parent, name) != 0) {
+        return -1;
+    }
+
+    target = finddir_fs(parent, name);
+    if (target == 0) {
+        return -2;
+    }
+
+    for (uint32_t i = 0U; i < VFS_MAX_MOUNTS; ++i) {
+        if (vfs_mounts[i].mountpoint == target ||
+            vfs_mounts[i].root == target) {
+            return -3;
+        }
+    }
+
+    return remove_fs(parent, name);
 }
 
 int vfs_mount(const char *path, fs_node_t *root) {
