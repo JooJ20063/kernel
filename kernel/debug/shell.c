@@ -24,6 +24,7 @@
 
 #ifndef __x86_64__
 extern void user_test_entry(void);
+extern void user_fault_test_entry(void);
 extern uint8_t user_stack_top;
 extern void enter_ring3(uint32_t entry, uint32_t user_stack);
 #endif
@@ -642,7 +643,7 @@ static void shell_cmd_krealloc_slot(const char *arg) {
 
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task ps pmm vmm wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test lastexit waittest\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault lastexit waittest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
@@ -836,6 +837,23 @@ static void shell_run_command(const char *cmd) {
         }
 
         vga_puts("Ring 3 task created pid=");
+        vga_putdec((uint32_t)pid);
+        vga_puts("\n");
+    } else if (str_eq(cmd, "ring3fault")) {
+        int pid;
+
+        pid = sched_create_user_task(
+            "ring3-fault",
+            user_fault_test_entry,
+            (uintptr_t)&user_stack_top
+        );
+
+        if (pid < 0) {
+            klog_warn("failed to create Ring 3 fault task");
+            return;
+        }
+
+        vga_puts("Ring 3 fault task created pid=");
         vga_putdec((uint32_t)pid);
         vga_puts("\n");
 #endif
