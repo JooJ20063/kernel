@@ -82,6 +82,42 @@ abi_error_test_failed:
 
 abi_error_test_done:
 
+    # fd 2 is stderr and must be writable.
+    mov $1, %eax
+    mov $2, %ebx
+    mov $fd_stderr_message, %ecx
+    mov $(fd_stderr_message_end-fd_stderr_message), %edx
+    int $0x80
+
+    cmp $(fd_stderr_message_end-fd_stderr_message), %eax
+    jne fd_table_test_failed
+
+    # fd 0 is stdin and must reject write().
+    mov $1, %eax
+    xor %ebx, %ebx
+    mov $user_message, %ecx
+    mov $1, %edx
+    int $0x80
+
+    cmp $-CZK_EBADF, %eax
+    jne fd_table_test_failed
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $fd_table_ok, %ecx
+    mov $(fd_table_ok_end-fd_table_ok), %edx
+    int $0x80
+    jmp fd_table_test_done
+
+fd_table_test_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $fd_table_fail, %ecx
+    mov $(fd_table_fail_end-fd_table_fail), %edx
+    int $0x80
+
+fd_table_test_done:
+
     # getpid()
     mov $3, %eax
     int $0x80
@@ -255,6 +291,18 @@ abi_error_ok_end:
 abi_error_fail:
     .ascii "abi: typed syscall errors FAILED\n"
 abi_error_fail_end:
+
+fd_stderr_message:
+    .ascii "fdtable: hello from stderr\n"
+fd_stderr_message_end:
+
+fd_table_ok:
+    .ascii "fdtable: stdio routing ok\n"
+fd_table_ok_end:
+
+fd_table_fail:
+    .ascii "fdtable: stdio routing FAILED\n"
+fd_table_fail_end:
 
 pid_message:
     .ascii "pid="
