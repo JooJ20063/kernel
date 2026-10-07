@@ -11,5 +11,7 @@
 #define SYS_OPEN    8
 #define SYS_READ    9
 #define SYS_CLOSE  10
+#define SYS_LSEEK  11
+#define SYS_FSTAT  12
 
 #endif
