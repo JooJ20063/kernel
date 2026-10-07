@@ -2,7 +2,7 @@
 #include <arch/x86/pic.h>
 #include <kernel/vga.h>
 #include <kernel/sched.h>
-#include <kernel/shell.h>
+#include <kernel/ring0_shell.h>
 #include <kernel/task.h>
 #include <kernel/serial.h>
 #include <kernel/tty.h>
@@ -125,13 +125,13 @@ static void input_route_char(char c) {
     if (tty1_input_focus() == TTY_INPUT_FOCUS_TTY1) {
         tty1_receive_char(c);
     } else {
-        shell_on_key(c);
+        ring0_shell_on_key(c);
     }
 }
 
 static void input_return_to_kernel_shell(void) {
     tty1_set_input_focus(TTY_INPUT_FOCUS_SHELL);
-    shell_resume_input();
+    ring0_shell_resume_input();
 }
 
 static void keyboard_irq(void) {
