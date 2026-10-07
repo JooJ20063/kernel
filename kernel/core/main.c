@@ -141,8 +141,25 @@ static uint32_t read_cr2(void) {
     return value;
 }
 
-static void page_fault_handler(registers_t *r) {
+static registers_t *page_fault_handler(registers_t *r) {
     uint32_t fault_addr = read_cr2();
+
+    /*
+     * The low two bits of CS contain the CPL of the interrupted context.
+     * A userspace page fault terminates only the offending task; a kernel
+     * page fault remains fatal because continuing could corrupt the system.
+     */
+    if ((r->cs & 0x3U) == 0x3U) {
+        vga_puts("[user fault] pid=");
+        vga_putdec(sched_current_pid());
+        vga_puts(" page fault at ");
+        vga_puthex(fault_addr);
+        vga_puts(" err=");
+        vga_puthex(r->err);
+        vga_puts("; task terminated\n");
+
+        return task_exit_from_exception(r, -14);
+    }
 
     vga_set_color(0x0F, 0x04);
     vga_clear();
@@ -203,8 +220,7 @@ registers_t *isr_handler_c(registers_t *r) {
     }
 
     if (r->int_no == 14) {
-        page_fault_handler(r);
-        return r;
+        return page_fault_handler(r);
     }
 
     const char *reason = "Unhandled exception";
