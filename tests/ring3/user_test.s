@@ -126,3 +126,4 @@ after_sleep:
     .ascii "After sleep\n"
 after_sleep_end:
 
+.section .note.GNU-stack,"",@progbits

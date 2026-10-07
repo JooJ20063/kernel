@@ -1,102 +1,118 @@
 # Cruzeiro Kernel (CZK)
 
-**Cruzeiro Kernel (CZK)** is the kernel of the **Cruzeiro OS** project, an operating system developed primarily for learning, experimentation and systems programming research.
+**Cruzeiro Kernel (CZK)** is the kernel of the **Cruzeiro OS** project, developed for learning, experimentation and systems programming research.
 
-The project is written mainly in **C and Assembly** and currently targets the x86 family.
+The project is written mainly in **C and Assembly**.
 
 ## Architectures
 
-- **CZK_x86** — 32-bit x86 kernel, currently the primary development target.
-- **CZK_x86-64** — experimental 64-bit x86 kernel path.
+- **CZK_x86** — 32-bit x86 kernel and current supported development target.
+- **CZK_x86-64** — experimental source tree, currently frozen while the process model, ABI and userspace architecture are stabilized on x86.
 
 ## Current Status
 
 CZK_x86 currently includes:
 
-- Multiboot2 boot support through GRUB
-- Bare-metal boot on x86 hardware through Legacy/CSM
-- Global Descriptor Table (GDT)
-- Interrupt Descriptor Table (IDT)
-- ISR and IRQ infrastructure
-- PIC and PIT support
-- PS/2 keyboard input
-- VGA text-mode output
-- Physical Memory Manager (PMM)
-- Virtual Memory Manager (VMM)
-- Paging and kernel write protection
-- Kernel heap (`kmalloc`)
-- Virtual File System (VFS)
-- RAMFS
+- GRUB / Multiboot2 boot
+- GDT, IDT, ISR and IRQ infrastructure
+- PIC and PIT
+- PS/2 keyboard
+- VGA text console
+- COM1 serial console
+- PMM and VMM
+- Paging, null guard and kernel write protection
+- Kernel heap
+- VFS and RAMFS
 - Preemptive task scheduler
-- Task lifecycle management
-- Sleep and wait queues
+- Sleep, wait queues and zombie lifecycle
 - Lazy FPU context management
-- Task State Segment (TSS)
-- `int 0x80` syscall interface
+- TSS
+- Ring 3 groundwork
+- `int 0x80` syscall ABI
+- libK memory primitives
 - Kernel diagnostic shell
-- Kernel logging and panic infrastructure
-
-Ring 3 userspace support is currently under development.
-
-## Project Philosophy
-
-Cruzeiro OS is not intended to be a Linux clone.
-
-The long-term goal is to provide a system with its own kernel architecture and syscall ABI while adopting POSIX-like interfaces where they are useful for portability and software development.
-
-Future userspace components are expected to include:
-
-- **CLibC** — Cruzeiro C Library
-- **CPKG** — Cruzeiro Package Manager
-
-## Boot
-
-The x86 kernel uses **Multiboot2** and is loaded by GRUB.
-
-The current 32-bit path has also been validated on physical x86 hardware.
+- Logging and panic infrastructure
 
 ## Build
 
-Build the primary x86 kernel with:
+Build the primary x86 kernel:
 
 ```bash
 make
 ```
 
-Create a bootable ISO with:
+Validate the freestanding C sources:
+
+```bash
+make check
+```
+
+Create a bootable ISO:
 
 ```bash
 make iso
 ```
 
-Run it under QEMU with:
+Run with VGA:
 
 ```bash
 make run
 ```
 
-## Documentation
+Run through the serial console:
 
-Technical documentation is available under:
-
-```text
-docs/
-```
-
-The architecture overview can be found in:
-
-```text
-docs/ARCHITECTURE.md
+```bash
+make run-serial
 ```
 
 ## Project Structure
 
 ```text
-arch/       Architecture-specific C code
-boot/       Low-level boot and Assembly code
-docs/       Technical documentation
-include/    Kernel headers
-kernel/     Core kernel subsystems
+arch/       Architecture-owned CPU, boot, MM and headers
+boot/       Bootloader configuration
+drivers/    Hardware-facing drivers
+include/    Kernel-private public headers
+kernel/     Architecture-independent kernel subsystems
+libk/       Freestanding kernel runtime library
+mk/         Build fragments
+tests/      Kernel and embedded Ring 3 tests
+uapi/       Kernel/userspace ABI headers
+docs/       Architecture, runtime and development documentation
+```
+
+The primary x86 tree lives under:
+
+```text
+arch/x86/
+```
+
+The experimental 64-bit tree lives under:
+
+```text
+arch/x86_64/
+```
+
+## Documentation
+
+- `docs/ARCHITECTURE.md`
+- `docs/RUNTIME.md`
+- `docs/DEVELOPMENT.md`
+- `docs/TREE.md`
+- `docs/ROADMAP.md`
+
+## Userspace Direction
+
+Cruzeiro OS is not intended to be a Linux clone.
+
+The project will define its own syscall ABI while adopting POSIX-like interfaces where useful for portability. Planned userspace projects include:
+
+- **CLibC** — Cruzeiro C Library
+- **CPKG** — Cruzeiro Package Manager
+
+The public ABI shared with future userspace components lives under:
+
+```text
+uapi/include/
 ```
 
 ## License

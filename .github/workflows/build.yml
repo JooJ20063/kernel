@@ -22,29 +22,37 @@ jobs:
         run: |
           sudo rm -f /etc/apt/apt.conf.d/docker-clean
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-multilib binutils
+          sudo apt-get install -y --no-install-recommends \
+            gcc-multilib \
+            binutils \
+            grub-common \
+            grub-pc-bin \
+            xorriso \
+            mtools \
+            ripgrep
 
-      - name: Install ripgrep
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
-
-
-      - name: Sanity checks (kernel entry + multiboot2 symbols)
+      - name: Sanity checks
         run: |
-          test "$(rg -n '^void kernel_main\(' kernel/kernel.c | wc -l)" -eq 1
+          test "$(rg -n '^void kernel_main\(' kernel/core/main.c | wc -l)" -eq 1
           rg -n '^#define MULTIBOOT2_TAG_END ' include/kernel/multiboot2.h
           rg -n '^#define MULTIBOOT2_TAG_MMAP ' include/kernel/multiboot2.h
           rg -n '^#define MULTIBOOT2_MMAP_AVAILABLE ' include/kernel/multiboot2.h
           rg -n 'struct multiboot2_tag\b' include/kernel/multiboot2.h
           rg -n 'struct multiboot2_tag_mmap\b' include/kernel/multiboot2.h
           rg -n 'struct multiboot2_mmap_entry\b' include/kernel/multiboot2.h
-          rg -n '^#include <kernel/multiboot2.h>' kernel/pmm.c
+          rg -n '^#include <kernel/multiboot2.h>' kernel/mm/pmm.c
 
       - name: Build kernel
         run: |
           make clean
           make
-      - name: Build kernel
-        run: make
 
       - name: Freestanding check
         run: make check
+
+      - name: Verify Multiboot2 image
+        run: |
+          grub-file --is-x86-multiboot2 czk_x86.bin
+
+      - name: Build bootable ISO
+        run: make iso

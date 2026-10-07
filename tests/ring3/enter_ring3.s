@@ -31,3 +31,5 @@ enter_ring3:
     pushl %eax          # User EIP
 
     iret
+
+.section .note.GNU-stack,"",@progbits
