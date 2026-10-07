@@ -161,7 +161,6 @@ static void keyboard_irq(void) {
     char c = kbd_translate_abnt2(scancode, kbd_shift, kbd_caps);
     if (c != 0) {
         tty1_receive_char(c);
-        tty1_receive_char(c);
         shell_on_key(c);
     }
 }
@@ -176,6 +175,7 @@ static void serial_irq(void) {
             c = '\b';
         }
 
+        tty1_receive_char(c);
         shell_on_key(c);
     }
 }
