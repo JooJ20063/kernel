@@ -2,7 +2,7 @@
 #include <arch/x86_64/pic.h>
 #include <kernel/vga.h>
 #include <kernel/sched.h>
-#include <kernel/shell.h>
+#include <kernel/ring0_shell.h>
 
 #define PIC1_DATA_PORT 0x21
 #define PIC2_DATA_PORT 0xA1
@@ -110,11 +110,11 @@ static void keyboard_irq(void) {
     if (scancode == 0x3A) { kbd_caps ^= 1; return; }
     if (scancode & 0x80) return;
 
-    if (scancode == 0x1C) { shell_on_key('\n'); return; }
-    if (scancode == 0x0E) { shell_on_key('\b'); return; }
+    if (scancode == 0x1C) { ring0_shell_on_key('\n'); return; }
+    if (scancode == 0x0E) { ring0_shell_on_key('\b'); return; }
 
     char c = kbd_translate_abnt2(scancode, kbd_shift, kbd_caps);
-    if (c != 0) shell_on_key(c);
+    if (c != 0) ring0_shell_on_key(c);
 }
 
 void irq_init(uint32_t timer_hz, uint32_t scheduler_quantum_ticks) {

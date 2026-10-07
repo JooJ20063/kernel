@@ -10,6 +10,7 @@ static volatile uint32_t tty1_head;
 static volatile uint32_t tty1_tail;
 static volatile uint32_t tty1_count;
 static volatile uint32_t tty1_drop_count;
+static volatile tty_input_focus_t tty1_focus;
 static wait_queue_t tty1_read_waiters;
 
 static uint32_t tty_irq_save_disable(void) {
@@ -148,6 +149,7 @@ void tty1_init(void) {
     tty1_tail = 0U;
     tty1_count = 0U;
     tty1_drop_count = 0U;
+    tty1_focus = TTY_INPUT_FOCUS_SHELL;
     wait_queue_init(&tty1_read_waiters);
 }
 
@@ -180,6 +182,22 @@ void tty1_flush_input(void) {
     tty1_count = 0U;
 
     tty_irq_restore(flags);
+}
+
+void tty1_set_input_focus(tty_input_focus_t focus) {
+    uint32_t flags = tty_irq_save_disable();
+
+    if (focus == TTY_INPUT_FOCUS_TTY1) {
+        tty1_focus = TTY_INPUT_FOCUS_TTY1;
+    } else {
+        tty1_focus = TTY_INPUT_FOCUS_SHELL;
+    }
+
+    tty_irq_restore(flags);
+}
+
+tty_input_focus_t tty1_input_focus(void) {
+    return tty1_focus;
 }
 
 uint32_t tty1_pending(void) {

@@ -6,7 +6,7 @@
 #include <kernel/kmalloc.h>
 #include <kernel/panic.h>
 #include <kernel/klog.h>
-#include <kernel/shell.h>
+#include <kernel/ring0_shell.h>
 #include <kernel/ramfs.h>
 #include <kernel/syscall.h>
 #include <arch/x86_64/regs.h>
@@ -83,7 +83,7 @@ void kernel_main(void) {
 
     asm volatile ("sti");
 
-    shell_init();
+    ring0_shell_init();
 
     for (;;) {
         asm volatile ("hlt");

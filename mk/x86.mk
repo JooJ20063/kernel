@@ -26,7 +26,7 @@ C_SRCS := \
 	kernel/fs/tty.c \
 	kernel/sched/process.c \
 	kernel/sched/task.c \
-	kernel/debug/shell.c \
+	kernel/debug/ring0_shell.c \
 	kernel/syscall/syscall.c \
 	kernel/uaccess/uaccess.c \
 	arch/x86/cpu/idt.c \
