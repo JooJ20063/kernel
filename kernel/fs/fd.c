@@ -181,3 +181,82 @@ int32_t fd_write(
 
     return -1;
 }
+
+int32_t fd_seek(
+    fd_table_t *table,
+    uint32_t fd,
+    int32_t offset,
+    uint32_t whence,
+    uint32_t *new_offset
+) {
+    fd_entry_t *entry;
+    int64_t base;
+    int64_t result;
+
+    if (table == 0 || fd >= FD_TABLE_MAX || new_offset == 0) {
+        return -1;
+    }
+
+    entry = &table->entries[fd];
+
+    if (entry->kind == FD_KIND_NONE) {
+        return -1;
+    }
+
+    if (entry->kind != FD_KIND_VFS || entry->node == 0) {
+        return -2;
+    }
+
+    switch (whence) {
+        case 0U:
+            base = 0;
+            break;
+
+        case 1U:
+            base = (int64_t)entry->offset;
+            break;
+
+        case 2U:
+            base = (int64_t)entry->node->size;
+            break;
+
+        default:
+            return -3;
+    }
+
+    result = base + (int64_t)offset;
+
+    if (result < 0 || (uint64_t)result > 0xFFFFFFFFULL) {
+        return -3;
+    }
+
+    entry->offset = (uint32_t)result;
+    *new_offset = entry->offset;
+    return 0;
+}
+
+int32_t fd_stat(
+    fd_table_t *table,
+    uint32_t fd,
+    uint32_t *size_out,
+    uint32_t *flags_out
+) {
+    fd_entry_t *entry;
+
+    if (table == 0 ||
+        fd >= FD_TABLE_MAX ||
+        size_out == 0 ||
+        flags_out == 0) {
+        return -1;
+    }
+
+    entry = &table->entries[fd];
+
+    if (entry->kind != FD_KIND_VFS || entry->node == 0) {
+        return -1;
+    }
+
+    *size_out = entry->node->size;
+    *flags_out = entry->node->flags;
+    return 0;
+}
