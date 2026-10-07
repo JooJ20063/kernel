@@ -503,6 +503,1716 @@ tty_fg_failed:
     jmp 1b
 
 
+.global user_tty_canonical_test_entry
+user_tty_canonical_test_entry:
+    # Canonical read must not return until Enter commits the line.
+    mov $1, %eax
+    mov $1, %ebx
+    mov $tty_canon_waiting, %ecx
+    mov $(tty_canon_waiting_end-tty_canon_waiting), %edx
+    int $0x80
+
+    mov $9, %eax
+    xor %ebx, %ebx
+    mov $tty_canon_buffer, %ecx
+    mov $32, %edx
+    int $0x80
+
+    cmp $6, %eax
+    jne tty_canon_failed
+
+    cmpb user_ud_test_entry:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $ud_test_message, %ecx
+    mov $(ud_test_message_end-ud_test_message), %edx
+    int $0x80
+
+    ud2
+
+    mov $2, %eax
+    mov $98, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_gp_test_entry
+user_gp_test_entry:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $gp_test_message, %ecx
+    mov $(gp_test_message_end-gp_test_message), %edx
+    int $0x80
+
+    cli
+
+    mov $2, %eax
+    mov $97, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_aspace_test_entry
+user_aspace_test_entry:
+    cmpl $0, aspace_private_word
+    jne aspace_test_failed
+
+    movl $0xA5A5A5A5, aspace_private_word
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $aspace_ok_message, %ecx
+    mov $(aspace_ok_message_end-aspace_ok_message), %edx
+    int $0x80
+
+    mov $2, %eax
+    xor %ebx, %ebx
+    int $0x80
+
+aspace_test_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $aspace_fail_message, %ecx
+    mov $(aspace_fail_message_end-aspace_fail_message), %edx
+    int $0x80
+
+    mov $2, %eax
+    mov $1, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_fault_test_entry
+user_fault_test_entry:
+    # Announce the deliberate fault through the normal syscall path.
+    mov $1, %eax
+    mov $1, %ebx
+    mov $fault_test_message, %ecx
+    mov $(fault_test_message_end-fault_test_message), %edx
+    int $0x80
+
+    # Deliberate Ring 3 write to the unmapped null page.
+    movl $0xDEADBEEF, 0x00000000
+
+    # This path must never execute.
+    mov $2, %eax
+    mov $99, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.section .userdata, "aw", @progbits
+.align 16
+
+.global syscall_test_message
+.global syscall_test_message_end
+syscall_test_message:
+    .ascii "hello from int 0x80\n"
+syscall_test_message_end:
+
+.align 16
+user_stack_bottom:
+    .skip 4096
+
+.global user_stack_top
+user_stack_top:
+
+user_message:
+    .ascii "Hello from ring 3\n"
+user_message_end:
+
+fault_test_message:
+    .ascii "ring3fault: touching null page\n"
+fault_test_message_end:
+
+ud_test_message:
+    .ascii "ring3ud: executing UD2\n"
+ud_test_message_end:
+
+gp_test_message:
+    .ascii "ring3gp: executing privileged CLI\n"
+gp_test_message_end:
+
+aspace_ok_message:
+    .ascii "aspace: private userdata ok\n"
+aspace_ok_message_end:
+
+aspace_fail_message:
+    .ascii "aspace: private userdata FAILED\n"
+aspace_fail_message_end:
+
+.align 4
+aspace_private_word:
+    .long 0
+
+uaccess_ok:
+    .ascii "uaccess: kernel pointer rejected\n"
+uaccess_ok_end:
+
+uaccess_fail:
+    .ascii "uaccess: kernel pointer ACCEPTED\n"
+uaccess_fail_end:
+
+abi_error_ok:
+    .ascii "abi: typed syscall errors ok\n"
+abi_error_ok_end:
+
+abi_error_fail:
+    .ascii "abi: typed syscall errors FAILED\n"
+abi_error_fail_end:
+
+fd_stderr_message:
+    .ascii "fdtable: hello from stderr\n"
+fd_stderr_message_end:
+
+fd_table_ok:
+    .ascii "fdtable: stdio routing ok\n"
+fd_table_ok_end:
+
+fd_table_fail:
+    .ascii "fdtable: stdio routing FAILED\n"
+fd_table_fail_end:
+
+tty_block_waiting:
+    .ascii "ttyblock: waiting for stdin\n"
+tty_block_waiting_end:
+
+tty_block_ok:
+    .ascii "ttyblock: read woke with Z\n"
+tty_block_ok_end:
+
+tty_block_fail:
+    .ascii "ttyblock: FAILED\n"
+tty_block_fail_end:
+
+tty_block_byte:
+    .byte 0
+
+tty_fg_waiting:
+    .ascii "ttyfg: waiting for one input byte\n"
+tty_fg_waiting_end:
+
+tty_fg_prefix:
+    .ascii "ttyfg: read byte='"
+tty_fg_prefix_end:
+
+tty_fg_suffix:
+    .ascii "' OK\n"
+tty_fg_suffix_end:
+
+tty_fg_fail:
+    .ascii "ttyfg: read FAILED\n"
+tty_fg_fail_end:
+
+tty_fg_byte:
+    .byte 0
+
+tty_canon_waiting:
+    .ascii "ttycanon: waiting for line\n"
+tty_canon_waiting_end:
+
+tty_canon_ok:
+    .ascii "ttycanon: canonical read/backspace OK\n"
+tty_canon_ok_end:
+
+tty_canon_fail:
+    .ascii "ttycanon: FAILED\n"
+tty_canon_fail_end:
+
+.align 16
+tty_canon_buffer:
+    .skip 32
+
+fileio_path:
+    .asciz "ring3.txt"
+
+fileio_payload:
+    .ascii "CZK userspace file I/O works\n"
+fileio_payload_end:
+
+fileio_ok:
+    .ascii "fileio: roundtrip ok\n"
+fileio_ok_end:
+
+fileio_fail:
+    .ascii "fileio: roundtrip FAILED\n"
+fileio_fail_end:
+
+seek_stat_ok:
+    .ascii "fileio: lseek/fstat ok\n"
+seek_stat_ok_end:
+
+seek_stat_fail:
+    .ascii "fileio: lseek/fstat FAILED\n"
+seek_stat_fail_end:
+
+dirent_ok:
+    .ascii "fileio: readdir ok\n"
+dirent_ok_end:
+
+dirent_fail:
+    .ascii "fileio: readdir FAILED\n"
+dirent_fail_end:
+
+root_path:
+    .asciz "/"
+
+.align 16
+dirent_buffer:
+    .skip 136
+
+.align 16
+fileio_buffer:
+    .skip 64
+
+.align 4
+fileio_stat:
+    .skip 8
+
+.align 16
+fileio_seek_buffer:
+    .skip 16
+
+pid_message:
+    .ascii "pid="
+user_pid_digit:
+    .byte '0'
+    .ascii "\n"
+pid_message_end:
+
+ppid_message:
+    .ascii "ppid="
+user_ppid_digit:
+    .byte '0'
+    .ascii "\n"
+ppid_message_end:
+
+before_yield:
+    .ascii "before yield\n"
+before_yield_end:
+after_yield:
+    .ascii "after yield\n"
+after_yield_end:
+
+before_sleep:
+    .ascii "Before sleep\n"
+before_sleep_end:
+after_sleep:
+    .ascii "After sleep\n"
+after_sleep_end:
+
+.section .note.GNU-stack,"",@progbits
+h', tty_canon_buffer+0
+    jne tty_canon_failed
+    cmpb user_ud_test_entry:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $ud_test_message, %ecx
+    mov $(ud_test_message_end-ud_test_message), %edx
+    int $0x80
+
+    ud2
+
+    mov $2, %eax
+    mov $98, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_gp_test_entry
+user_gp_test_entry:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $gp_test_message, %ecx
+    mov $(gp_test_message_end-gp_test_message), %edx
+    int $0x80
+
+    cli
+
+    mov $2, %eax
+    mov $97, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_aspace_test_entry
+user_aspace_test_entry:
+    cmpl $0, aspace_private_word
+    jne aspace_test_failed
+
+    movl $0xA5A5A5A5, aspace_private_word
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $aspace_ok_message, %ecx
+    mov $(aspace_ok_message_end-aspace_ok_message), %edx
+    int $0x80
+
+    mov $2, %eax
+    xor %ebx, %ebx
+    int $0x80
+
+aspace_test_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $aspace_fail_message, %ecx
+    mov $(aspace_fail_message_end-aspace_fail_message), %edx
+    int $0x80
+
+    mov $2, %eax
+    mov $1, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_fault_test_entry
+user_fault_test_entry:
+    # Announce the deliberate fault through the normal syscall path.
+    mov $1, %eax
+    mov $1, %ebx
+    mov $fault_test_message, %ecx
+    mov $(fault_test_message_end-fault_test_message), %edx
+    int $0x80
+
+    # Deliberate Ring 3 write to the unmapped null page.
+    movl $0xDEADBEEF, 0x00000000
+
+    # This path must never execute.
+    mov $2, %eax
+    mov $99, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.section .userdata, "aw", @progbits
+.align 16
+
+.global syscall_test_message
+.global syscall_test_message_end
+syscall_test_message:
+    .ascii "hello from int 0x80\n"
+syscall_test_message_end:
+
+.align 16
+user_stack_bottom:
+    .skip 4096
+
+.global user_stack_top
+user_stack_top:
+
+user_message:
+    .ascii "Hello from ring 3\n"
+user_message_end:
+
+fault_test_message:
+    .ascii "ring3fault: touching null page\n"
+fault_test_message_end:
+
+ud_test_message:
+    .ascii "ring3ud: executing UD2\n"
+ud_test_message_end:
+
+gp_test_message:
+    .ascii "ring3gp: executing privileged CLI\n"
+gp_test_message_end:
+
+aspace_ok_message:
+    .ascii "aspace: private userdata ok\n"
+aspace_ok_message_end:
+
+aspace_fail_message:
+    .ascii "aspace: private userdata FAILED\n"
+aspace_fail_message_end:
+
+.align 4
+aspace_private_word:
+    .long 0
+
+uaccess_ok:
+    .ascii "uaccess: kernel pointer rejected\n"
+uaccess_ok_end:
+
+uaccess_fail:
+    .ascii "uaccess: kernel pointer ACCEPTED\n"
+uaccess_fail_end:
+
+abi_error_ok:
+    .ascii "abi: typed syscall errors ok\n"
+abi_error_ok_end:
+
+abi_error_fail:
+    .ascii "abi: typed syscall errors FAILED\n"
+abi_error_fail_end:
+
+fd_stderr_message:
+    .ascii "fdtable: hello from stderr\n"
+fd_stderr_message_end:
+
+fd_table_ok:
+    .ascii "fdtable: stdio routing ok\n"
+fd_table_ok_end:
+
+fd_table_fail:
+    .ascii "fdtable: stdio routing FAILED\n"
+fd_table_fail_end:
+
+tty_block_waiting:
+    .ascii "ttyblock: waiting for stdin\n"
+tty_block_waiting_end:
+
+tty_block_ok:
+    .ascii "ttyblock: read woke with Z\n"
+tty_block_ok_end:
+
+tty_block_fail:
+    .ascii "ttyblock: FAILED\n"
+tty_block_fail_end:
+
+tty_block_byte:
+    .byte 0
+
+tty_fg_waiting:
+    .ascii "ttyfg: waiting for one input byte\n"
+tty_fg_waiting_end:
+
+tty_fg_prefix:
+    .ascii "ttyfg: read byte='"
+tty_fg_prefix_end:
+
+tty_fg_suffix:
+    .ascii "' OK\n"
+tty_fg_suffix_end:
+
+tty_fg_fail:
+    .ascii "ttyfg: read FAILED\n"
+tty_fg_fail_end:
+
+tty_fg_byte:
+    .byte 0
+
+fileio_path:
+    .asciz "ring3.txt"
+
+fileio_payload:
+    .ascii "CZK userspace file I/O works\n"
+fileio_payload_end:
+
+fileio_ok:
+    .ascii "fileio: roundtrip ok\n"
+fileio_ok_end:
+
+fileio_fail:
+    .ascii "fileio: roundtrip FAILED\n"
+fileio_fail_end:
+
+seek_stat_ok:
+    .ascii "fileio: lseek/fstat ok\n"
+seek_stat_ok_end:
+
+seek_stat_fail:
+    .ascii "fileio: lseek/fstat FAILED\n"
+seek_stat_fail_end:
+
+dirent_ok:
+    .ascii "fileio: readdir ok\n"
+dirent_ok_end:
+
+dirent_fail:
+    .ascii "fileio: readdir FAILED\n"
+dirent_fail_end:
+
+root_path:
+    .asciz "/"
+
+.align 16
+dirent_buffer:
+    .skip 136
+
+.align 16
+fileio_buffer:
+    .skip 64
+
+.align 4
+fileio_stat:
+    .skip 8
+
+.align 16
+fileio_seek_buffer:
+    .skip 16
+
+pid_message:
+    .ascii "pid="
+user_pid_digit:
+    .byte '0'
+    .ascii "\n"
+pid_message_end:
+
+ppid_message:
+    .ascii "ppid="
+user_ppid_digit:
+    .byte '0'
+    .ascii "\n"
+ppid_message_end:
+
+before_yield:
+    .ascii "before yield\n"
+before_yield_end:
+after_yield:
+    .ascii "after yield\n"
+after_yield_end:
+
+before_sleep:
+    .ascii "Before sleep\n"
+before_sleep_end:
+after_sleep:
+    .ascii "After sleep\n"
+after_sleep_end:
+
+.section .note.GNU-stack,"",@progbits
+e', tty_canon_buffer+1
+    jne tty_canon_failed
+    cmpb user_ud_test_entry:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $ud_test_message, %ecx
+    mov $(ud_test_message_end-ud_test_message), %edx
+    int $0x80
+
+    ud2
+
+    mov $2, %eax
+    mov $98, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_gp_test_entry
+user_gp_test_entry:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $gp_test_message, %ecx
+    mov $(gp_test_message_end-gp_test_message), %edx
+    int $0x80
+
+    cli
+
+    mov $2, %eax
+    mov $97, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_aspace_test_entry
+user_aspace_test_entry:
+    cmpl $0, aspace_private_word
+    jne aspace_test_failed
+
+    movl $0xA5A5A5A5, aspace_private_word
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $aspace_ok_message, %ecx
+    mov $(aspace_ok_message_end-aspace_ok_message), %edx
+    int $0x80
+
+    mov $2, %eax
+    xor %ebx, %ebx
+    int $0x80
+
+aspace_test_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $aspace_fail_message, %ecx
+    mov $(aspace_fail_message_end-aspace_fail_message), %edx
+    int $0x80
+
+    mov $2, %eax
+    mov $1, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_fault_test_entry
+user_fault_test_entry:
+    # Announce the deliberate fault through the normal syscall path.
+    mov $1, %eax
+    mov $1, %ebx
+    mov $fault_test_message, %ecx
+    mov $(fault_test_message_end-fault_test_message), %edx
+    int $0x80
+
+    # Deliberate Ring 3 write to the unmapped null page.
+    movl $0xDEADBEEF, 0x00000000
+
+    # This path must never execute.
+    mov $2, %eax
+    mov $99, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.section .userdata, "aw", @progbits
+.align 16
+
+.global syscall_test_message
+.global syscall_test_message_end
+syscall_test_message:
+    .ascii "hello from int 0x80\n"
+syscall_test_message_end:
+
+.align 16
+user_stack_bottom:
+    .skip 4096
+
+.global user_stack_top
+user_stack_top:
+
+user_message:
+    .ascii "Hello from ring 3\n"
+user_message_end:
+
+fault_test_message:
+    .ascii "ring3fault: touching null page\n"
+fault_test_message_end:
+
+ud_test_message:
+    .ascii "ring3ud: executing UD2\n"
+ud_test_message_end:
+
+gp_test_message:
+    .ascii "ring3gp: executing privileged CLI\n"
+gp_test_message_end:
+
+aspace_ok_message:
+    .ascii "aspace: private userdata ok\n"
+aspace_ok_message_end:
+
+aspace_fail_message:
+    .ascii "aspace: private userdata FAILED\n"
+aspace_fail_message_end:
+
+.align 4
+aspace_private_word:
+    .long 0
+
+uaccess_ok:
+    .ascii "uaccess: kernel pointer rejected\n"
+uaccess_ok_end:
+
+uaccess_fail:
+    .ascii "uaccess: kernel pointer ACCEPTED\n"
+uaccess_fail_end:
+
+abi_error_ok:
+    .ascii "abi: typed syscall errors ok\n"
+abi_error_ok_end:
+
+abi_error_fail:
+    .ascii "abi: typed syscall errors FAILED\n"
+abi_error_fail_end:
+
+fd_stderr_message:
+    .ascii "fdtable: hello from stderr\n"
+fd_stderr_message_end:
+
+fd_table_ok:
+    .ascii "fdtable: stdio routing ok\n"
+fd_table_ok_end:
+
+fd_table_fail:
+    .ascii "fdtable: stdio routing FAILED\n"
+fd_table_fail_end:
+
+tty_block_waiting:
+    .ascii "ttyblock: waiting for stdin\n"
+tty_block_waiting_end:
+
+tty_block_ok:
+    .ascii "ttyblock: read woke with Z\n"
+tty_block_ok_end:
+
+tty_block_fail:
+    .ascii "ttyblock: FAILED\n"
+tty_block_fail_end:
+
+tty_block_byte:
+    .byte 0
+
+tty_fg_waiting:
+    .ascii "ttyfg: waiting for one input byte\n"
+tty_fg_waiting_end:
+
+tty_fg_prefix:
+    .ascii "ttyfg: read byte='"
+tty_fg_prefix_end:
+
+tty_fg_suffix:
+    .ascii "' OK\n"
+tty_fg_suffix_end:
+
+tty_fg_fail:
+    .ascii "ttyfg: read FAILED\n"
+tty_fg_fail_end:
+
+tty_fg_byte:
+    .byte 0
+
+fileio_path:
+    .asciz "ring3.txt"
+
+fileio_payload:
+    .ascii "CZK userspace file I/O works\n"
+fileio_payload_end:
+
+fileio_ok:
+    .ascii "fileio: roundtrip ok\n"
+fileio_ok_end:
+
+fileio_fail:
+    .ascii "fileio: roundtrip FAILED\n"
+fileio_fail_end:
+
+seek_stat_ok:
+    .ascii "fileio: lseek/fstat ok\n"
+seek_stat_ok_end:
+
+seek_stat_fail:
+    .ascii "fileio: lseek/fstat FAILED\n"
+seek_stat_fail_end:
+
+dirent_ok:
+    .ascii "fileio: readdir ok\n"
+dirent_ok_end:
+
+dirent_fail:
+    .ascii "fileio: readdir FAILED\n"
+dirent_fail_end:
+
+root_path:
+    .asciz "/"
+
+.align 16
+dirent_buffer:
+    .skip 136
+
+.align 16
+fileio_buffer:
+    .skip 64
+
+.align 4
+fileio_stat:
+    .skip 8
+
+.align 16
+fileio_seek_buffer:
+    .skip 16
+
+pid_message:
+    .ascii "pid="
+user_pid_digit:
+    .byte '0'
+    .ascii "\n"
+pid_message_end:
+
+ppid_message:
+    .ascii "ppid="
+user_ppid_digit:
+    .byte '0'
+    .ascii "\n"
+ppid_message_end:
+
+before_yield:
+    .ascii "before yield\n"
+before_yield_end:
+after_yield:
+    .ascii "after yield\n"
+after_yield_end:
+
+before_sleep:
+    .ascii "Before sleep\n"
+before_sleep_end:
+after_sleep:
+    .ascii "After sleep\n"
+after_sleep_end:
+
+.section .note.GNU-stack,"",@progbits
+l', tty_canon_buffer+2
+    jne tty_canon_failed
+    cmpb user_ud_test_entry:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $ud_test_message, %ecx
+    mov $(ud_test_message_end-ud_test_message), %edx
+    int $0x80
+
+    ud2
+
+    mov $2, %eax
+    mov $98, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_gp_test_entry
+user_gp_test_entry:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $gp_test_message, %ecx
+    mov $(gp_test_message_end-gp_test_message), %edx
+    int $0x80
+
+    cli
+
+    mov $2, %eax
+    mov $97, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_aspace_test_entry
+user_aspace_test_entry:
+    cmpl $0, aspace_private_word
+    jne aspace_test_failed
+
+    movl $0xA5A5A5A5, aspace_private_word
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $aspace_ok_message, %ecx
+    mov $(aspace_ok_message_end-aspace_ok_message), %edx
+    int $0x80
+
+    mov $2, %eax
+    xor %ebx, %ebx
+    int $0x80
+
+aspace_test_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $aspace_fail_message, %ecx
+    mov $(aspace_fail_message_end-aspace_fail_message), %edx
+    int $0x80
+
+    mov $2, %eax
+    mov $1, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_fault_test_entry
+user_fault_test_entry:
+    # Announce the deliberate fault through the normal syscall path.
+    mov $1, %eax
+    mov $1, %ebx
+    mov $fault_test_message, %ecx
+    mov $(fault_test_message_end-fault_test_message), %edx
+    int $0x80
+
+    # Deliberate Ring 3 write to the unmapped null page.
+    movl $0xDEADBEEF, 0x00000000
+
+    # This path must never execute.
+    mov $2, %eax
+    mov $99, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.section .userdata, "aw", @progbits
+.align 16
+
+.global syscall_test_message
+.global syscall_test_message_end
+syscall_test_message:
+    .ascii "hello from int 0x80\n"
+syscall_test_message_end:
+
+.align 16
+user_stack_bottom:
+    .skip 4096
+
+.global user_stack_top
+user_stack_top:
+
+user_message:
+    .ascii "Hello from ring 3\n"
+user_message_end:
+
+fault_test_message:
+    .ascii "ring3fault: touching null page\n"
+fault_test_message_end:
+
+ud_test_message:
+    .ascii "ring3ud: executing UD2\n"
+ud_test_message_end:
+
+gp_test_message:
+    .ascii "ring3gp: executing privileged CLI\n"
+gp_test_message_end:
+
+aspace_ok_message:
+    .ascii "aspace: private userdata ok\n"
+aspace_ok_message_end:
+
+aspace_fail_message:
+    .ascii "aspace: private userdata FAILED\n"
+aspace_fail_message_end:
+
+.align 4
+aspace_private_word:
+    .long 0
+
+uaccess_ok:
+    .ascii "uaccess: kernel pointer rejected\n"
+uaccess_ok_end:
+
+uaccess_fail:
+    .ascii "uaccess: kernel pointer ACCEPTED\n"
+uaccess_fail_end:
+
+abi_error_ok:
+    .ascii "abi: typed syscall errors ok\n"
+abi_error_ok_end:
+
+abi_error_fail:
+    .ascii "abi: typed syscall errors FAILED\n"
+abi_error_fail_end:
+
+fd_stderr_message:
+    .ascii "fdtable: hello from stderr\n"
+fd_stderr_message_end:
+
+fd_table_ok:
+    .ascii "fdtable: stdio routing ok\n"
+fd_table_ok_end:
+
+fd_table_fail:
+    .ascii "fdtable: stdio routing FAILED\n"
+fd_table_fail_end:
+
+tty_block_waiting:
+    .ascii "ttyblock: waiting for stdin\n"
+tty_block_waiting_end:
+
+tty_block_ok:
+    .ascii "ttyblock: read woke with Z\n"
+tty_block_ok_end:
+
+tty_block_fail:
+    .ascii "ttyblock: FAILED\n"
+tty_block_fail_end:
+
+tty_block_byte:
+    .byte 0
+
+tty_fg_waiting:
+    .ascii "ttyfg: waiting for one input byte\n"
+tty_fg_waiting_end:
+
+tty_fg_prefix:
+    .ascii "ttyfg: read byte='"
+tty_fg_prefix_end:
+
+tty_fg_suffix:
+    .ascii "' OK\n"
+tty_fg_suffix_end:
+
+tty_fg_fail:
+    .ascii "ttyfg: read FAILED\n"
+tty_fg_fail_end:
+
+tty_fg_byte:
+    .byte 0
+
+fileio_path:
+    .asciz "ring3.txt"
+
+fileio_payload:
+    .ascii "CZK userspace file I/O works\n"
+fileio_payload_end:
+
+fileio_ok:
+    .ascii "fileio: roundtrip ok\n"
+fileio_ok_end:
+
+fileio_fail:
+    .ascii "fileio: roundtrip FAILED\n"
+fileio_fail_end:
+
+seek_stat_ok:
+    .ascii "fileio: lseek/fstat ok\n"
+seek_stat_ok_end:
+
+seek_stat_fail:
+    .ascii "fileio: lseek/fstat FAILED\n"
+seek_stat_fail_end:
+
+dirent_ok:
+    .ascii "fileio: readdir ok\n"
+dirent_ok_end:
+
+dirent_fail:
+    .ascii "fileio: readdir FAILED\n"
+dirent_fail_end:
+
+root_path:
+    .asciz "/"
+
+.align 16
+dirent_buffer:
+    .skip 136
+
+.align 16
+fileio_buffer:
+    .skip 64
+
+.align 4
+fileio_stat:
+    .skip 8
+
+.align 16
+fileio_seek_buffer:
+    .skip 16
+
+pid_message:
+    .ascii "pid="
+user_pid_digit:
+    .byte '0'
+    .ascii "\n"
+pid_message_end:
+
+ppid_message:
+    .ascii "ppid="
+user_ppid_digit:
+    .byte '0'
+    .ascii "\n"
+ppid_message_end:
+
+before_yield:
+    .ascii "before yield\n"
+before_yield_end:
+after_yield:
+    .ascii "after yield\n"
+after_yield_end:
+
+before_sleep:
+    .ascii "Before sleep\n"
+before_sleep_end:
+after_sleep:
+    .ascii "After sleep\n"
+after_sleep_end:
+
+.section .note.GNU-stack,"",@progbits
+l', tty_canon_buffer+3
+    jne tty_canon_failed
+    cmpb user_ud_test_entry:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $ud_test_message, %ecx
+    mov $(ud_test_message_end-ud_test_message), %edx
+    int $0x80
+
+    ud2
+
+    mov $2, %eax
+    mov $98, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_gp_test_entry
+user_gp_test_entry:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $gp_test_message, %ecx
+    mov $(gp_test_message_end-gp_test_message), %edx
+    int $0x80
+
+    cli
+
+    mov $2, %eax
+    mov $97, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_aspace_test_entry
+user_aspace_test_entry:
+    cmpl $0, aspace_private_word
+    jne aspace_test_failed
+
+    movl $0xA5A5A5A5, aspace_private_word
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $aspace_ok_message, %ecx
+    mov $(aspace_ok_message_end-aspace_ok_message), %edx
+    int $0x80
+
+    mov $2, %eax
+    xor %ebx, %ebx
+    int $0x80
+
+aspace_test_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $aspace_fail_message, %ecx
+    mov $(aspace_fail_message_end-aspace_fail_message), %edx
+    int $0x80
+
+    mov $2, %eax
+    mov $1, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_fault_test_entry
+user_fault_test_entry:
+    # Announce the deliberate fault through the normal syscall path.
+    mov $1, %eax
+    mov $1, %ebx
+    mov $fault_test_message, %ecx
+    mov $(fault_test_message_end-fault_test_message), %edx
+    int $0x80
+
+    # Deliberate Ring 3 write to the unmapped null page.
+    movl $0xDEADBEEF, 0x00000000
+
+    # This path must never execute.
+    mov $2, %eax
+    mov $99, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.section .userdata, "aw", @progbits
+.align 16
+
+.global syscall_test_message
+.global syscall_test_message_end
+syscall_test_message:
+    .ascii "hello from int 0x80\n"
+syscall_test_message_end:
+
+.align 16
+user_stack_bottom:
+    .skip 4096
+
+.global user_stack_top
+user_stack_top:
+
+user_message:
+    .ascii "Hello from ring 3\n"
+user_message_end:
+
+fault_test_message:
+    .ascii "ring3fault: touching null page\n"
+fault_test_message_end:
+
+ud_test_message:
+    .ascii "ring3ud: executing UD2\n"
+ud_test_message_end:
+
+gp_test_message:
+    .ascii "ring3gp: executing privileged CLI\n"
+gp_test_message_end:
+
+aspace_ok_message:
+    .ascii "aspace: private userdata ok\n"
+aspace_ok_message_end:
+
+aspace_fail_message:
+    .ascii "aspace: private userdata FAILED\n"
+aspace_fail_message_end:
+
+.align 4
+aspace_private_word:
+    .long 0
+
+uaccess_ok:
+    .ascii "uaccess: kernel pointer rejected\n"
+uaccess_ok_end:
+
+uaccess_fail:
+    .ascii "uaccess: kernel pointer ACCEPTED\n"
+uaccess_fail_end:
+
+abi_error_ok:
+    .ascii "abi: typed syscall errors ok\n"
+abi_error_ok_end:
+
+abi_error_fail:
+    .ascii "abi: typed syscall errors FAILED\n"
+abi_error_fail_end:
+
+fd_stderr_message:
+    .ascii "fdtable: hello from stderr\n"
+fd_stderr_message_end:
+
+fd_table_ok:
+    .ascii "fdtable: stdio routing ok\n"
+fd_table_ok_end:
+
+fd_table_fail:
+    .ascii "fdtable: stdio routing FAILED\n"
+fd_table_fail_end:
+
+tty_block_waiting:
+    .ascii "ttyblock: waiting for stdin\n"
+tty_block_waiting_end:
+
+tty_block_ok:
+    .ascii "ttyblock: read woke with Z\n"
+tty_block_ok_end:
+
+tty_block_fail:
+    .ascii "ttyblock: FAILED\n"
+tty_block_fail_end:
+
+tty_block_byte:
+    .byte 0
+
+tty_fg_waiting:
+    .ascii "ttyfg: waiting for one input byte\n"
+tty_fg_waiting_end:
+
+tty_fg_prefix:
+    .ascii "ttyfg: read byte='"
+tty_fg_prefix_end:
+
+tty_fg_suffix:
+    .ascii "' OK\n"
+tty_fg_suffix_end:
+
+tty_fg_fail:
+    .ascii "ttyfg: read FAILED\n"
+tty_fg_fail_end:
+
+tty_fg_byte:
+    .byte 0
+
+fileio_path:
+    .asciz "ring3.txt"
+
+fileio_payload:
+    .ascii "CZK userspace file I/O works\n"
+fileio_payload_end:
+
+fileio_ok:
+    .ascii "fileio: roundtrip ok\n"
+fileio_ok_end:
+
+fileio_fail:
+    .ascii "fileio: roundtrip FAILED\n"
+fileio_fail_end:
+
+seek_stat_ok:
+    .ascii "fileio: lseek/fstat ok\n"
+seek_stat_ok_end:
+
+seek_stat_fail:
+    .ascii "fileio: lseek/fstat FAILED\n"
+seek_stat_fail_end:
+
+dirent_ok:
+    .ascii "fileio: readdir ok\n"
+dirent_ok_end:
+
+dirent_fail:
+    .ascii "fileio: readdir FAILED\n"
+dirent_fail_end:
+
+root_path:
+    .asciz "/"
+
+.align 16
+dirent_buffer:
+    .skip 136
+
+.align 16
+fileio_buffer:
+    .skip 64
+
+.align 4
+fileio_stat:
+    .skip 8
+
+.align 16
+fileio_seek_buffer:
+    .skip 16
+
+pid_message:
+    .ascii "pid="
+user_pid_digit:
+    .byte '0'
+    .ascii "\n"
+pid_message_end:
+
+ppid_message:
+    .ascii "ppid="
+user_ppid_digit:
+    .byte '0'
+    .ascii "\n"
+ppid_message_end:
+
+before_yield:
+    .ascii "before yield\n"
+before_yield_end:
+after_yield:
+    .ascii "after yield\n"
+after_yield_end:
+
+before_sleep:
+    .ascii "Before sleep\n"
+before_sleep_end:
+after_sleep:
+    .ascii "After sleep\n"
+after_sleep_end:
+
+.section .note.GNU-stack,"",@progbits
+o', tty_canon_buffer+4
+    jne tty_canon_failed
+    cmpb user_ud_test_entry:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $ud_test_message, %ecx
+    mov $(ud_test_message_end-ud_test_message), %edx
+    int $0x80
+
+    ud2
+
+    mov $2, %eax
+    mov $98, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_gp_test_entry
+user_gp_test_entry:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $gp_test_message, %ecx
+    mov $(gp_test_message_end-gp_test_message), %edx
+    int $0x80
+
+    cli
+
+    mov $2, %eax
+    mov $97, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_aspace_test_entry
+user_aspace_test_entry:
+    cmpl $0, aspace_private_word
+    jne aspace_test_failed
+
+    movl $0xA5A5A5A5, aspace_private_word
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $aspace_ok_message, %ecx
+    mov $(aspace_ok_message_end-aspace_ok_message), %edx
+    int $0x80
+
+    mov $2, %eax
+    xor %ebx, %ebx
+    int $0x80
+
+aspace_test_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $aspace_fail_message, %ecx
+    mov $(aspace_fail_message_end-aspace_fail_message), %edx
+    int $0x80
+
+    mov $2, %eax
+    mov $1, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_fault_test_entry
+user_fault_test_entry:
+    # Announce the deliberate fault through the normal syscall path.
+    mov $1, %eax
+    mov $1, %ebx
+    mov $fault_test_message, %ecx
+    mov $(fault_test_message_end-fault_test_message), %edx
+    int $0x80
+
+    # Deliberate Ring 3 write to the unmapped null page.
+    movl $0xDEADBEEF, 0x00000000
+
+    # This path must never execute.
+    mov $2, %eax
+    mov $99, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.section .userdata, "aw", @progbits
+.align 16
+
+.global syscall_test_message
+.global syscall_test_message_end
+syscall_test_message:
+    .ascii "hello from int 0x80\n"
+syscall_test_message_end:
+
+.align 16
+user_stack_bottom:
+    .skip 4096
+
+.global user_stack_top
+user_stack_top:
+
+user_message:
+    .ascii "Hello from ring 3\n"
+user_message_end:
+
+fault_test_message:
+    .ascii "ring3fault: touching null page\n"
+fault_test_message_end:
+
+ud_test_message:
+    .ascii "ring3ud: executing UD2\n"
+ud_test_message_end:
+
+gp_test_message:
+    .ascii "ring3gp: executing privileged CLI\n"
+gp_test_message_end:
+
+aspace_ok_message:
+    .ascii "aspace: private userdata ok\n"
+aspace_ok_message_end:
+
+aspace_fail_message:
+    .ascii "aspace: private userdata FAILED\n"
+aspace_fail_message_end:
+
+.align 4
+aspace_private_word:
+    .long 0
+
+uaccess_ok:
+    .ascii "uaccess: kernel pointer rejected\n"
+uaccess_ok_end:
+
+uaccess_fail:
+    .ascii "uaccess: kernel pointer ACCEPTED\n"
+uaccess_fail_end:
+
+abi_error_ok:
+    .ascii "abi: typed syscall errors ok\n"
+abi_error_ok_end:
+
+abi_error_fail:
+    .ascii "abi: typed syscall errors FAILED\n"
+abi_error_fail_end:
+
+fd_stderr_message:
+    .ascii "fdtable: hello from stderr\n"
+fd_stderr_message_end:
+
+fd_table_ok:
+    .ascii "fdtable: stdio routing ok\n"
+fd_table_ok_end:
+
+fd_table_fail:
+    .ascii "fdtable: stdio routing FAILED\n"
+fd_table_fail_end:
+
+tty_block_waiting:
+    .ascii "ttyblock: waiting for stdin\n"
+tty_block_waiting_end:
+
+tty_block_ok:
+    .ascii "ttyblock: read woke with Z\n"
+tty_block_ok_end:
+
+tty_block_fail:
+    .ascii "ttyblock: FAILED\n"
+tty_block_fail_end:
+
+tty_block_byte:
+    .byte 0
+
+tty_fg_waiting:
+    .ascii "ttyfg: waiting for one input byte\n"
+tty_fg_waiting_end:
+
+tty_fg_prefix:
+    .ascii "ttyfg: read byte='"
+tty_fg_prefix_end:
+
+tty_fg_suffix:
+    .ascii "' OK\n"
+tty_fg_suffix_end:
+
+tty_fg_fail:
+    .ascii "ttyfg: read FAILED\n"
+tty_fg_fail_end:
+
+tty_fg_byte:
+    .byte 0
+
+fileio_path:
+    .asciz "ring3.txt"
+
+fileio_payload:
+    .ascii "CZK userspace file I/O works\n"
+fileio_payload_end:
+
+fileio_ok:
+    .ascii "fileio: roundtrip ok\n"
+fileio_ok_end:
+
+fileio_fail:
+    .ascii "fileio: roundtrip FAILED\n"
+fileio_fail_end:
+
+seek_stat_ok:
+    .ascii "fileio: lseek/fstat ok\n"
+seek_stat_ok_end:
+
+seek_stat_fail:
+    .ascii "fileio: lseek/fstat FAILED\n"
+seek_stat_fail_end:
+
+dirent_ok:
+    .ascii "fileio: readdir ok\n"
+dirent_ok_end:
+
+dirent_fail:
+    .ascii "fileio: readdir FAILED\n"
+dirent_fail_end:
+
+root_path:
+    .asciz "/"
+
+.align 16
+dirent_buffer:
+    .skip 136
+
+.align 16
+fileio_buffer:
+    .skip 64
+
+.align 4
+fileio_stat:
+    .skip 8
+
+.align 16
+fileio_seek_buffer:
+    .skip 16
+
+pid_message:
+    .ascii "pid="
+user_pid_digit:
+    .byte '0'
+    .ascii "\n"
+pid_message_end:
+
+ppid_message:
+    .ascii "ppid="
+user_ppid_digit:
+    .byte '0'
+    .ascii "\n"
+ppid_message_end:
+
+before_yield:
+    .ascii "before yield\n"
+before_yield_end:
+after_yield:
+    .ascii "after yield\n"
+after_yield_end:
+
+before_sleep:
+    .ascii "Before sleep\n"
+before_sleep_end:
+after_sleep:
+    .ascii "After sleep\n"
+after_sleep_end:
+
+.section .note.GNU-stack,"",@progbits
+\n', tty_canon_buffer+5
+    jne tty_canon_failed
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $tty_canon_ok, %ecx
+    mov $(tty_canon_ok_end-tty_canon_ok), %edx
+    int $0x80
+
+    mov $2, %eax
+    xor %ebx, %ebx
+    int $0x80
+
+tty_canon_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $tty_canon_fail, %ecx
+    mov $(tty_canon_fail_end-tty_canon_fail), %edx
+    int $0x80
+
+    mov $2, %eax
+    mov $1, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
 .global user_ud_test_entry
 user_ud_test_entry:
     mov $1, %eax
