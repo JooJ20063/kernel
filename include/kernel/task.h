@@ -87,6 +87,7 @@ void task_wait(wait_queue_t *queue);
 void task_yield(void);
 void task_exit_code(int32_t exit_code) __attribute__((noreturn));
 void task_exit(void) __attribute__((noreturn));
+registers_t *task_exit_from_exception(registers_t *regs, int32_t exit_code);
 void task_block(void);
 void task_wake(task_t *task);
 
