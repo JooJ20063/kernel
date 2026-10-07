@@ -3,6 +3,7 @@
 #include <kernel/task.h>
 #include <kernel/sched.h>
 #include <kernel/uaccess.h>
+#include <kernel/fd.h>
 #include <czk/errno.h>
 
 static uint32_t syscall_error(uint32_t error_number) {
@@ -17,19 +18,32 @@ registers_t *syscall_handler(registers_t *regs) {
     switch (regs->eax) {
         case SYS_WRITE: {
             uint32_t fd = regs->ebx;
-            const char *buf = (const char *)(uintptr_t)regs->ecx;
+            const uint8_t *buf =
+                (const uint8_t *)(uintptr_t)regs->ecx;
             uint32_t len = regs->edx;
             uint32_t offset = 0U;
-            char kernel_buf[128];
+            uint8_t kernel_buf[128];
+            task_t *task = sched_current_task_ptr();
 
-            if (fd != 1U) {
+            if (task == 0 || !fd_is_writable(&task->fds, fd)) {
                 regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            /*
+             * Validate the whole userspace range before producing output.
+             * This prevents a write from partially succeeding and then
+             * discovering that a later page is not accessible to Ring 3.
+             */
+            if (!user_ptr_valid(buf, len, 0)) {
+                regs->eax = syscall_error(CZK_EFAULT);
                 break;
             }
 
             while (offset < len) {
                 uint32_t remaining = len - offset;
                 uint32_t chunk = remaining;
+                int32_t written;
 
                 if (chunk > (uint32_t)sizeof(kernel_buf)) {
                     chunk = (uint32_t)sizeof(kernel_buf);
@@ -43,11 +57,18 @@ registers_t *syscall_handler(registers_t *regs) {
                     break;
                 }
 
-                for (uint32_t i = 0; i < chunk; ++i) {
-                    vga_putc(kernel_buf[i]);
+                written = fd_write(&task->fds, fd, kernel_buf, chunk);
+                if (written < 0) {
+                    regs->eax = syscall_error(CZK_EBADF);
+                    break;
                 }
 
-                offset += chunk;
+                offset += (uint32_t)written;
+
+                if ((uint32_t)written < chunk) {
+                    regs->eax = offset;
+                    break;
+                }
             }
 
             if (offset == len) {
