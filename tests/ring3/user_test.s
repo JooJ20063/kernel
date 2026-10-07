@@ -112,6 +112,42 @@ uaccess_test_done:
     jmp 1b
 
 
+.global user_ud_test_entry
+user_ud_test_entry:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $ud_test_message, %ecx
+    mov $(ud_test_message_end-ud_test_message), %edx
+    int $0x80
+
+    ud2
+
+    mov $2, %eax
+    mov $98, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
+.global user_gp_test_entry
+user_gp_test_entry:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $gp_test_message, %ecx
+    mov $(gp_test_message_end-gp_test_message), %edx
+    int $0x80
+
+    cli
+
+    mov $2, %eax
+    mov $97, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
 .global user_fault_test_entry
 user_fault_test_entry:
     # Announce the deliberate fault through the normal syscall path.
@@ -149,6 +185,14 @@ user_message_end:
 fault_test_message:
     .ascii "ring3fault: touching null page\n"
 fault_test_message_end:
+
+ud_test_message:
+    .ascii "ring3ud: executing UD2\n"
+ud_test_message_end:
+
+gp_test_message:
+    .ascii "ring3gp: executing privileged CLI\n"
+gp_test_message_end:
 
 uaccess_ok:
     .ascii "uaccess: kernel pointer rejected\n"
