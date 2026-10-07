@@ -14,5 +14,6 @@
 #define SYS_LSEEK  11
 #define SYS_FSTAT  12
 #define SYS_READDIR 13
+#define SYS_EXECVE  14
 
 #endif
