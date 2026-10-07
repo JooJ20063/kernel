@@ -448,6 +448,61 @@ tty_block_failed:
     jmp 1b
 
 
+.global user_tty_foreground_test_entry
+user_tty_foreground_test_entry:
+    # Manual foreground test: any single input byte is valid.
+    mov $1, %eax
+    mov $1, %ebx
+    mov $tty_fg_waiting, %ecx
+    mov $(tty_fg_waiting_end-tty_fg_waiting), %edx
+    int $0x80
+
+    mov $9, %eax
+    xor %ebx, %ebx
+    mov $tty_fg_byte, %ecx
+    mov $1, %edx
+    int $0x80
+
+    cmp $1, %eax
+    jne tty_fg_failed
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $tty_fg_prefix, %ecx
+    mov $(tty_fg_prefix_end-tty_fg_prefix), %edx
+    int $0x80
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $tty_fg_byte, %ecx
+    mov $1, %edx
+    int $0x80
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $tty_fg_suffix, %ecx
+    mov $(tty_fg_suffix_end-tty_fg_suffix), %edx
+    int $0x80
+
+    mov $2, %eax
+    xor %ebx, %ebx
+    int $0x80
+
+tty_fg_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $tty_fg_fail, %ecx
+    mov $(tty_fg_fail_end-tty_fg_fail), %edx
+    int $0x80
+
+    mov $2, %eax
+    mov $1, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
 .global user_ud_test_entry
 user_ud_test_entry:
     mov $1, %eax
@@ -622,6 +677,25 @@ tty_block_fail:
 tty_block_fail_end:
 
 tty_block_byte:
+    .byte 0
+
+tty_fg_waiting:
+    .ascii "ttyfg: waiting for one input byte\n"
+tty_fg_waiting_end:
+
+tty_fg_prefix:
+    .ascii "ttyfg: read byte='"
+tty_fg_prefix_end:
+
+tty_fg_suffix:
+    .ascii "' OK\n"
+tty_fg_suffix_end:
+
+tty_fg_fail:
+    .ascii "ttyfg: read FAILED\n"
+tty_fg_fail_end:
+
+tty_fg_byte:
     .byte 0
 
 fileio_path:

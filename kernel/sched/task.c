@@ -3,6 +3,8 @@
 #include <kernel/kmalloc.h>
 #include <kernel/vga.h>
 #include <kernel/vmm.h>
+#include <kernel/tty.h>
+#include <kernel/ring0_shell.h>
 #include <arch/x86/irq.h>
 #include <arch/x86/tss.h>
 
@@ -993,8 +995,20 @@ void task_yield(void) {
     asm volatile ("int $0x81");
 }
 
+static void task_release_foreground_tty(process_t *process) {
+    if (process != 0 &&
+        tty1_release_foreground(process->pid) != 0) {
+        /*
+         * The Ring 0 shell is the current fallback owner until a real
+         * userspace session/init path exists.
+         */
+        ring0_shell_resume_input();
+    }
+}
+
 void task_exit_code(int32_t code) {
     if (current != 0) {
+        task_release_foreground_tty(current->process);
         process_mark_exit(current->process, code);
         current->block_reason = TASK_BLOCK_NONE;
         current->wake_tick = 0;
@@ -1016,6 +1030,7 @@ registers_t *task_exit_from_exception(registers_t *regs, int32_t exit_code) {
     }
 
     current->context = regs;
+    task_release_foreground_tty(current->process);
     process_mark_exit(current->process, exit_code);
     current->block_reason = TASK_BLOCK_NONE;
     current->wake_tick = 0;
