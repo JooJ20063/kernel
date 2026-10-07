@@ -5,6 +5,7 @@
 #include <kernel/shell.h>
 #include <kernel/task.h>
 #include <kernel/serial.h>
+#include <kernel/tty.h>
 #include <arch/x86/fpu.h>
 
 
@@ -146,17 +147,21 @@ static void keyboard_irq(void) {
     }
 
     if (scancode == 0x1C) {
+        tty1_receive_char('\n');
         shell_on_key('\n');
         return;
     }
 
     if (scancode == 0x0E) {
+        tty1_receive_char('\b');
         shell_on_key('\b');
         return;
     }
 
     char c = kbd_translate_abnt2(scancode, kbd_shift, kbd_caps);
     if (c != 0) {
+        tty1_receive_char(c);
+        tty1_receive_char(c);
         shell_on_key(c);
     }
 }
