@@ -1,6 +1,5 @@
 #include <kernel/fd.h>
 #include <kernel/vfs.h>
-#include <kernel/vga.h>
 
 static void fd_entry_clear(fd_entry_t *entry) {
     entry->kind = FD_KIND_NONE;
@@ -18,14 +17,32 @@ void fd_table_init(fd_table_t *table) {
         fd_entry_clear(&table->entries[i]);
     }
 
-    table->entries[0].kind = FD_KIND_CONSOLE_IN;
-    table->entries[0].access = FD_ACCESS_READ;
+}
 
-    table->entries[1].kind = FD_KIND_CONSOLE_OUT;
-    table->entries[1].access = FD_ACCESS_WRITE;
+int fd_table_bind_stdio(fd_table_t *table, fs_node_t *tty_node) {
+    if (table == 0 || tty_node == 0 ||
+        tty_node->read == 0 ||
+        tty_node->write == 0) {
+        return -1;
+    }
 
-    table->entries[2].kind = FD_KIND_CONSOLE_OUT;
-    table->entries[2].access = FD_ACCESS_WRITE;
+    for (uint32_t fd = 0U; fd <= 2U; ++fd) {
+        fd_entry_t *entry = &table->entries[fd];
+
+        if (entry->kind == FD_KIND_VFS && entry->node != 0) {
+            close_fs(entry->node);
+        }
+
+        fd_entry_clear(entry);
+        entry->kind = FD_KIND_VFS;
+        entry->node = tty_node;
+        entry->offset = 0U;
+        entry->access =
+            (fd == 0U) ? FD_ACCESS_READ : FD_ACCESS_WRITE;
+        open_fs(tty_node);
+    }
+
+    return 0;
 }
 
 void fd_table_close_all(fd_table_t *table) {
@@ -160,15 +177,6 @@ int32_t fd_write(
 
     entry = &table->entries[fd];
 
-    if (entry->kind == FD_KIND_CONSOLE_OUT) {
-        for (uint32_t i = 0; i < size; ++i) {
-            vga_putc((char)buffer[i]);
-        }
-
-        entry->offset += size;
-        return (int32_t)size;
-    }
-
     if (entry->kind == FD_KIND_VFS) {
         uint32_t written = write_fs(
             entry->node,
@@ -206,6 +214,10 @@ int32_t fd_seek(
     }
 
     if (entry->kind != FD_KIND_VFS || entry->node == 0) {
+        return -2;
+    }
+
+    if ((entry->node->flags & FS_SEEKABLE) == 0U) {
         return -2;
     }
 

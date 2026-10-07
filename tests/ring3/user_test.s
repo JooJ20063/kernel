@@ -248,35 +248,32 @@ fileio_test_done:
 
     mov %eax, %ebx
 
+dirent_scan_next:
     # readdir(fd, &dirent)
     mov $13, %eax
     mov $dirent_buffer, %ecx
     int $0x80
 
+    # EOF before finding ring3.txt is a failure.
+    test %eax, %eax
+    jz dirent_test_failed
+
     cmp $1, %eax
     jne dirent_test_failed
 
-    # The first entry must be the file created above: "ring3.txt".
+    # Root now contains standard directories. Scan until ring3.txt is found.
     cld
     mov $fileio_path, %esi
     mov $dirent_buffer, %edi
     mov $10, %ecx
     repe cmpsb
-    jne dirent_test_failed
+    jne dirent_scan_next
 
     # d_flags must include FS_FILE and d_size must match the payload.
     testl $1, dirent_buffer+128
     jz dirent_test_failed
 
     cmpl $(fileio_payload_end-fileio_payload), dirent_buffer+132
-    jne dirent_test_failed
-
-    # There are no more entries in this RAMFS instance.
-    mov $13, %eax
-    mov $dirent_buffer, %ecx
-    int $0x80
-
-    test %eax, %eax
     jne dirent_test_failed
 
     # close(directory fd)
@@ -496,6 +493,13 @@ user_fault_test_entry:
 .section .userdata, "aw", @progbits
 .align 16
 
+.global syscall_test_message
+.global syscall_test_message_end
+syscall_test_message:
+    .ascii "hello from int 0x80\n"
+syscall_test_message_end:
+
+.align 16
 user_stack_bottom:
     .skip 4096
 

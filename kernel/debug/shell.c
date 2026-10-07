@@ -11,6 +11,7 @@
 #include <kernel/syscall.h>
 #include <kernel/serial.h>
 #include <kernel/tty.h>
+#include <kernel/fd.h>
 
 
 #ifdef __x86_64__
@@ -969,9 +970,85 @@ static void shell_cmd_ttytest(void) {
     vga_puts("\n");
 }
 
+static void shell_cmd_stdiotest(void) {
+    process_t *process = sched_current_process_ptr();
+    fs_node_t *tty = vfs_resolve("/dev/tty1");
+    static const uint8_t stdin_sample[] = {'O', 'K'};
+    static const uint8_t stdout_sample[] =
+        "[stdio] fd 1 -> /dev/tty1 OK\n";
+    uint8_t stdin_readback[sizeof(stdin_sample)];
+    uint8_t ok = 1U;
+
+    if (process == 0 || tty == 0) {
+        ok = 0U;
+    }
+
+    if (ok) {
+        fd_entry_t *stdin_entry = &process->fds.entries[0];
+        fd_entry_t *stdout_entry = &process->fds.entries[1];
+        fd_entry_t *stderr_entry = &process->fds.entries[2];
+
+        if (stdin_entry->kind != FD_KIND_VFS ||
+            stdout_entry->kind != FD_KIND_VFS ||
+            stderr_entry->kind != FD_KIND_VFS ||
+            stdin_entry->node != tty ||
+            stdout_entry->node != tty ||
+            stderr_entry->node != tty ||
+            stdin_entry->access != FD_ACCESS_READ ||
+            stdout_entry->access != FD_ACCESS_WRITE ||
+            stderr_entry->access != FD_ACCESS_WRITE) {
+            ok = 0U;
+        }
+    }
+
+    if (ok) {
+        tty1_flush_input();
+        tty1_receive_char((char)stdin_sample[0]);
+        tty1_receive_char((char)stdin_sample[1]);
+
+        if (fd_read(
+                &process->fds,
+                0U,
+                stdin_readback,
+                sizeof(stdin_readback)) !=
+            (int32_t)sizeof(stdin_readback) ||
+            stdin_readback[0] != stdin_sample[0] ||
+            stdin_readback[1] != stdin_sample[1]) {
+            ok = 0U;
+        }
+    }
+
+    if (ok &&
+        fd_write(
+            &process->fds,
+            1U,
+            stdout_sample,
+            (uint32_t)sizeof(stdout_sample) - 1U) !=
+        (int32_t)((uint32_t)sizeof(stdout_sample) - 1U)) {
+        ok = 0U;
+    }
+
+    if (ok) {
+        uint32_t new_offset = 0U;
+
+        if (fd_seek(
+                &process->fds,
+                1U,
+                0,
+                0U,
+                &new_offset) != -2) {
+            ok = 0U;
+        }
+    }
+
+    vga_puts("stdiotest: result=");
+    vga_puts(ok ? "STDIO->TTY1 OK" : "FAILED");
+    vga_puts("\n");
+}
+
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest stdiotest wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
@@ -1058,6 +1135,8 @@ static void shell_run_command(const char *cmd) {
         shell_cmd_devtest();
     } else if (str_eq(cmd, "ttytest")) {
         shell_cmd_ttytest();
+    } else if (str_eq(cmd, "stdiotest")) {
+        shell_cmd_stdiotest();
     } else if (str_eq(cmd, "wp")) {
         vga_puts("CR0.WP=");
         vga_puts(vmm_wp_is_enabled() ? "ON" : "OFF");

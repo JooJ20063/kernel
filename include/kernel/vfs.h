@@ -5,6 +5,7 @@
 #define FS_FILE      0x01U
 #define FS_DIRECTORY 0x02U
 #define FS_WRITABLE  0x04U
+#define FS_SEEKABLE  0x08U
 
 #define VFS_NAME_MAX 128U
 

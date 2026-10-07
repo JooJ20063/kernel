@@ -1,6 +1,7 @@
 #include <kernel/process.h>
 #include <kernel/kmalloc.h>
 #include <kernel/vmm.h>
+#include <kernel/vfs.h>
 
 static uint32_t next_pid = 1U;
 
@@ -41,6 +42,16 @@ process_t *process_create(
     process->cr3 = cr3;
     process->exited = 0U;
     fd_table_init(&process->fds);
+
+    {
+        fs_node_t *tty = vfs_resolve("/dev/tty1");
+
+        if (tty == 0 ||
+            fd_table_bind_stdio(&process->fds, tty) != 0) {
+            kfree(process);
+            return 0;
+        }
+    }
 
     return process;
 }

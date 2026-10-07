@@ -12,8 +12,6 @@ typedef struct fs_node fs_node_t;
 
 typedef enum fd_kind {
     FD_KIND_NONE = 0,
-    FD_KIND_CONSOLE_IN,
-    FD_KIND_CONSOLE_OUT,
     FD_KIND_VFS
 } fd_kind_t;
 
@@ -29,6 +27,7 @@ typedef struct fd_table {
 } fd_table_t;
 
 void fd_table_init(fd_table_t *table);
+int fd_table_bind_stdio(fd_table_t *table, fs_node_t *tty_node);
 void fd_table_close_all(fd_table_t *table);
 
 int fd_is_readable(const fd_table_t *table, uint32_t fd);

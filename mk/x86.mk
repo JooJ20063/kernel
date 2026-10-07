@@ -7,6 +7,7 @@ CFLAGS ?= -m32 -ffreestanding -Wall -Wextra -Werror
 override CFLAGS += -mno-sse -mno-sse2 -mno-mmx
 ASFLAGS ?= --32
 LDFLAGS ?= -m elf_i386 -T arch/x86/linker.ld
+DEPFLAGS := -MMD -MP
 
 C_SRCS := \
 	libk/memory.c \
@@ -46,14 +47,17 @@ ASM_SRCS := \
 C_OBJS := $(addprefix $(BUILD_DIR)/,$(C_SRCS:.c=.o))
 ASM_OBJS := $(addprefix $(BUILD_DIR)/,$(ASM_SRCS:.s=.o))
 OBJS := $(C_OBJS) $(ASM_OBJS)
+DEPS := $(C_OBJS:.o=.d)
 
 $(KERNEL_X86): $(OBJS)
 	$(LD) $(LDFLAGS) -o $@ $(OBJS)
 
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -c $< -o $@
 
 $(BUILD_DIR)/%.o: %.s
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) $< -o $@
+
+-include $(DEPS)
