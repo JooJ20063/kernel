@@ -78,6 +78,19 @@ void fpu_init_task(task_t *task) {
 
 }
 
+void fpu_reset_task(task_t *task) {
+    if (task == 0) {
+        return;
+    }
+
+    if (fpu_owner == task) {
+        fpu_owner = 0;
+    }
+
+    task->fpu_initialized = 0;
+    fpu_set_ts();
+}
+
 void fpu_free_task(task_t *task) {
     if (task == 0) {
         return;
