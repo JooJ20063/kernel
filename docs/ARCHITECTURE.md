@@ -47,7 +47,7 @@ CZK_x86 currently includes support for:
 - basic userspace file I/O through VFS/RAMFS;
 - Ring 0 diagnostic shell.
 
-**Ring 3** execution is functional for the current linked regression programs. External ELF userspace and private per-process address spaces are still under development.
+**Ring 3** execution is functional for the current linked regression programs. Private per-process address spaces are functional; external ELF userspace is the next major execution milestone.
 
 ---
 
@@ -421,6 +421,10 @@ User
 ```
 
 The kernel initially uses identity mapping for the regions required during bootstrap.
+
+A supervisor-only temporary mapping window is reserved at `0xFF800000` (PDE 1022). Two 4 KiB slots let the kernel temporarily map arbitrary physical frames for physical-to-virtual access, physical copies and zeroing. This allows user pages to live anywhere managed by the PMM instead of being restricted to the low bootstrap identity map. PDE 1023 remains free for a future recursive-paging design.
+
+Page-directory and page-table frames are still allocated below 12 MiB so the current kernel can manipulate paging structures directly through the bootstrap identity mapping.
 
 Virtual page zero remains unmapped as protection against null pointer dereferences.
 
@@ -899,7 +903,7 @@ Kernel mappings remain supervisor-only and reference the same physical kernel fr
 
 The scheduler switches `CR3` together with the task context. Kernel heap mappings are synchronized into all live address spaces so privilege transitions and kernel stacks remain valid across a context switch.
 
-Process model v1 currently allocates paging structures and copied userspace frames below 12 MiB so they remain reachable through the bootstrap identity mapping. A later temporary mapping window will remove that low-memory limitation.
+Process model v1 keeps paging-structure frames below 12 MiB so page directories and page tables remain directly reachable through the bootstrap identity mapping. User pages no longer have that restriction: the temporary mapping window can access and populate arbitrary physical frames managed by the PMM.
 
 ---
 

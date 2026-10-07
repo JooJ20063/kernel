@@ -10,13 +10,21 @@
 #define CR0_WP                 0x00010000U
 
 #define VMM_BOOTSTRAP_MB       16U
-#define VMM_LOW_FRAME_LIMIT    0x00C00000U
 #define VMM_MAX_ADDRESS_SPACES 32U
+
+/*
+ * Reserve PDE 1022 (0xFF800000-0xFFBFFFFF) for temporary physical
+ * mappings. PDE 1023 stays free for a future recursive-paging scheme.
+ */
+#define VMM_TEMP_SRC_ADDR       0xFF800000U
+#define VMM_TEMP_DST_ADDR       0xFF801000U
+#define VMM_TEMP_DIR_INDEX      1022U
 
 static uint32_t page_directory[PAGE_ENTRIES] __attribute__((aligned(4096)));
 static uint32_t address_spaces[VMM_MAX_ADDRESS_SPACES];
 static uint32_t address_space_count;
 static uint8_t vmm_enabled;
+static uint8_t temp_window_ready;
 
 static void mem_zero_u32(uint32_t *dst, uint32_t count) {
     for (uint32_t i = 0; i < count; ++i) {
@@ -24,9 +32,44 @@ static void mem_zero_u32(uint32_t *dst, uint32_t count) {
     }
 }
 
-static void mem_copy_page(uint8_t *dst, const uint8_t *src) {
-    for (uint32_t i = 0U; i < PAGE_SIZE; ++i) {
+static void mem_copy_bytes(
+    uint8_t *dst,
+    const uint8_t *src,
+    uint32_t len
+) {
+    for (uint32_t i = 0U; i < len; ++i) {
         dst[i] = src[i];
+    }
+}
+
+static void mem_zero_bytes(uint8_t *dst, uint32_t len) {
+    for (uint32_t i = 0U; i < len; ++i) {
+        dst[i] = 0U;
+    }
+}
+
+static uint32_t min_u32(uint32_t a, uint32_t b) {
+    return (a < b) ? a : b;
+}
+
+static uint32_t vmm_irq_save_disable(void) {
+    uint32_t flags;
+
+    asm volatile (
+        "pushf\n"
+        "pop %0\n"
+        "cli"
+        : "=r"(flags)
+        :
+        : "memory"
+    );
+
+    return flags;
+}
+
+static void vmm_irq_restore(uint32_t flags) {
+    if ((flags & (1U << 9)) != 0U) {
+        asm volatile ("sti" : : : "memory");
     }
 }
 
@@ -101,6 +144,84 @@ static uint32_t *vmm_ensure_table_for_directory(
         VMM_PAGE_RW;
 
     return table;
+}
+
+static int vmm_prepare_temp_window(void) {
+    uint32_t *table;
+
+    table = vmm_ensure_table_for_directory(
+        page_directory,
+        VMM_TEMP_DIR_INDEX
+    );
+    if (table == 0) {
+        return -1;
+    }
+
+    table[vmm_table_index(VMM_TEMP_SRC_ADDR)] = 0U;
+    table[vmm_table_index(VMM_TEMP_DST_ADDR)] = 0U;
+    temp_window_ready = 1U;
+    return 0;
+}
+
+static int vmm_temp_map_slot(
+    uintptr_t virt_addr,
+    uintptr_t phys_addr,
+    uint32_t flags
+) {
+    uint32_t *directory;
+    uint32_t *table;
+    uint32_t table_idx;
+
+    if (!vmm_enabled ||
+        !temp_window_ready ||
+        vmm_dir_index(virt_addr) != VMM_TEMP_DIR_INDEX) {
+        return -1;
+    }
+
+    directory =
+        vmm_directory_from_cr3(vmm_read_cr3());
+    table =
+        vmm_get_table_from_directory(
+            directory,
+            VMM_TEMP_DIR_INDEX
+        );
+    if (table == 0) {
+        return -1;
+    }
+
+    table_idx = vmm_table_index(virt_addr);
+    table[table_idx] =
+        ((uint32_t)phys_addr & PAGE_FRAME_MASK) |
+        VMM_PAGE_PRESENT |
+        (flags & VMM_PAGE_RW);
+
+    vmm_invlpg(virt_addr);
+    return 0;
+}
+
+static void vmm_temp_unmap_slot(uintptr_t virt_addr) {
+    uint32_t *directory;
+    uint32_t *table;
+
+    if (!vmm_enabled ||
+        !temp_window_ready ||
+        vmm_dir_index(virt_addr) != VMM_TEMP_DIR_INDEX) {
+        return;
+    }
+
+    directory =
+        vmm_directory_from_cr3(vmm_read_cr3());
+    table =
+        vmm_get_table_from_directory(
+            directory,
+            VMM_TEMP_DIR_INDEX
+        );
+    if (table == 0) {
+        return;
+    }
+
+    table[vmm_table_index(virt_addr)] = 0U;
+    vmm_invlpg(virt_addr);
 }
 
 static int vmm_map_page_in_directory(
@@ -338,6 +459,7 @@ void vmm_init(void) {
     uint32_t cr0;
 
     address_space_count = 0U;
+    temp_window_ready = 0U;
     for (uint32_t i = 0U;
          i < VMM_MAX_ADDRESS_SPACES;
          ++i) {
@@ -345,6 +467,7 @@ void vmm_init(void) {
     }
 
     vmm_map_identity(VMM_BOOTSTRAP_MB);
+    (void)vmm_prepare_temp_window();
 
     asm volatile (
         "mov %0, %%cr3"
@@ -528,6 +651,231 @@ uint32_t vmm_address_space_count(void) {
     return address_space_count;
 }
 
+uint8_t vmm_temp_window_is_ready(void) {
+    return temp_window_ready;
+}
+
+int vmm_copy_to_phys(
+    uintptr_t phys_addr,
+    const void *src,
+    uint32_t len
+) {
+    const uint8_t *source = (const uint8_t *)src;
+    uint32_t flags;
+
+    if (len == 0U) {
+        return 0;
+    }
+
+    if (source == 0 || !temp_window_ready) {
+        return -1;
+    }
+
+    flags = vmm_irq_save_disable();
+
+    while (len != 0U) {
+        uintptr_t frame =
+            phys_addr & (uintptr_t)PAGE_FRAME_MASK;
+        uint32_t offset =
+            (uint32_t)(phys_addr & (PAGE_SIZE - 1U));
+        uint32_t chunk =
+            min_u32(len, PAGE_SIZE - offset);
+
+        if (vmm_temp_map_slot(
+                VMM_TEMP_DST_ADDR,
+                frame,
+                VMM_PAGE_RW) != 0) {
+            vmm_irq_restore(flags);
+            return -2;
+        }
+
+        mem_copy_bytes(
+            (uint8_t *)(uintptr_t)
+                (VMM_TEMP_DST_ADDR + offset),
+            source,
+            chunk
+        );
+
+        vmm_temp_unmap_slot(VMM_TEMP_DST_ADDR);
+
+        source += chunk;
+        phys_addr += chunk;
+        len -= chunk;
+    }
+
+    vmm_irq_restore(flags);
+    return 0;
+}
+
+int vmm_copy_from_phys(
+    void *dst,
+    uintptr_t phys_addr,
+    uint32_t len
+) {
+    uint8_t *dest = (uint8_t *)dst;
+    uint32_t flags;
+
+    if (len == 0U) {
+        return 0;
+    }
+
+    if (dest == 0 || !temp_window_ready) {
+        return -1;
+    }
+
+    flags = vmm_irq_save_disable();
+
+    while (len != 0U) {
+        uintptr_t frame =
+            phys_addr & (uintptr_t)PAGE_FRAME_MASK;
+        uint32_t offset =
+            (uint32_t)(phys_addr & (PAGE_SIZE - 1U));
+        uint32_t chunk =
+            min_u32(len, PAGE_SIZE - offset);
+
+        if (vmm_temp_map_slot(
+                VMM_TEMP_SRC_ADDR,
+                frame,
+                0U) != 0) {
+            vmm_irq_restore(flags);
+            return -2;
+        }
+
+        mem_copy_bytes(
+            dest,
+            (const uint8_t *)(uintptr_t)
+                (VMM_TEMP_SRC_ADDR + offset),
+            chunk
+        );
+
+        vmm_temp_unmap_slot(VMM_TEMP_SRC_ADDR);
+
+        dest += chunk;
+        phys_addr += chunk;
+        len -= chunk;
+    }
+
+    vmm_irq_restore(flags);
+    return 0;
+}
+
+int vmm_copy_phys(
+    uintptr_t dst_phys,
+    uintptr_t src_phys,
+    uint32_t len
+) {
+    uint32_t flags;
+
+    if (len == 0U) {
+        return 0;
+    }
+
+    if (!temp_window_ready) {
+        return -1;
+    }
+
+    flags = vmm_irq_save_disable();
+
+    while (len != 0U) {
+        uintptr_t src_frame =
+            src_phys & (uintptr_t)PAGE_FRAME_MASK;
+        uintptr_t dst_frame =
+            dst_phys & (uintptr_t)PAGE_FRAME_MASK;
+        uint32_t src_offset =
+            (uint32_t)(src_phys & (PAGE_SIZE - 1U));
+        uint32_t dst_offset =
+            (uint32_t)(dst_phys & (PAGE_SIZE - 1U));
+        uint32_t chunk =
+            min_u32(
+                len,
+                min_u32(
+                    PAGE_SIZE - src_offset,
+                    PAGE_SIZE - dst_offset
+                )
+            );
+
+        if (vmm_temp_map_slot(
+                VMM_TEMP_SRC_ADDR,
+                src_frame,
+                0U) != 0) {
+            vmm_irq_restore(flags);
+            return -2;
+        }
+
+        if (vmm_temp_map_slot(
+                VMM_TEMP_DST_ADDR,
+                dst_frame,
+                VMM_PAGE_RW) != 0) {
+            vmm_temp_unmap_slot(VMM_TEMP_SRC_ADDR);
+            vmm_irq_restore(flags);
+            return -3;
+        }
+
+        mem_copy_bytes(
+            (uint8_t *)(uintptr_t)
+                (VMM_TEMP_DST_ADDR + dst_offset),
+            (const uint8_t *)(uintptr_t)
+                (VMM_TEMP_SRC_ADDR + src_offset),
+            chunk
+        );
+
+        vmm_temp_unmap_slot(VMM_TEMP_DST_ADDR);
+        vmm_temp_unmap_slot(VMM_TEMP_SRC_ADDR);
+
+        dst_phys += chunk;
+        src_phys += chunk;
+        len -= chunk;
+    }
+
+    vmm_irq_restore(flags);
+    return 0;
+}
+
+int vmm_zero_phys(uintptr_t phys_addr, uint32_t len) {
+    uint32_t flags;
+
+    if (len == 0U) {
+        return 0;
+    }
+
+    if (!temp_window_ready) {
+        return -1;
+    }
+
+    flags = vmm_irq_save_disable();
+
+    while (len != 0U) {
+        uintptr_t frame =
+            phys_addr & (uintptr_t)PAGE_FRAME_MASK;
+        uint32_t offset =
+            (uint32_t)(phys_addr & (PAGE_SIZE - 1U));
+        uint32_t chunk =
+            min_u32(len, PAGE_SIZE - offset);
+
+        if (vmm_temp_map_slot(
+                VMM_TEMP_DST_ADDR,
+                frame,
+                VMM_PAGE_RW) != 0) {
+            vmm_irq_restore(flags);
+            return -2;
+        }
+
+        mem_zero_bytes(
+            (uint8_t *)(uintptr_t)
+                (VMM_TEMP_DST_ADDR + offset),
+            chunk
+        );
+
+        vmm_temp_unmap_slot(VMM_TEMP_DST_ADDR);
+
+        phys_addr += chunk;
+        len -= chunk;
+    }
+
+    vmm_irq_restore(flags);
+    return 0;
+}
+
 int vmm_clone_user_range(
     uint32_t cr3,
     uintptr_t start,
@@ -542,16 +890,6 @@ int vmm_clone_user_range(
         (cr3 & PAGE_FRAME_MASK) == vmm_kernel_cr3() ||
         start >= end) {
         return -1;
-    }
-
-    /*
-     * Process model v1 copies linked Ring 3 sections from the
-     * kernel template.  Keep this operation on the kernel CR3;
-     * a later temporary mapping window will remove this low-memory
-     * restriction and allow arbitrary process creation contexts.
-     */
-    if (vmm_current_cr3() != vmm_kernel_cr3()) {
-        return -2;
     }
 
     directory =
@@ -576,19 +914,18 @@ int vmm_clone_user_range(
             return -3;
         }
 
-        frame =
-            pmm_alloc_frame_below(
-                VMM_LOW_FRAME_LIMIT
-            );
+        frame = pmm_alloc_frame();
         if (frame == 0U) {
             return -4;
         }
 
-        mem_copy_page(
-            (uint8_t *)(uintptr_t)frame,
-            (const uint8_t *)(uintptr_t)
-            (source_phys & PAGE_FRAME_MASK)
-        );
+        if (vmm_copy_phys(
+                frame,
+                source_phys & PAGE_FRAME_MASK,
+                PAGE_SIZE) != 0) {
+            pmm_free_frame(frame);
+            return -6;
+        }
 
         if (vmm_map_page_in_directory(
                 directory,
@@ -609,6 +946,10 @@ int vmm_map_page(
     uint32_t flags
 ) {
     int result;
+
+    if (vmm_dir_index(virt_addr) == VMM_TEMP_DIR_INDEX) {
+        return -3;
+    }
 
     result = vmm_map_page_in_directory(
         page_directory,
@@ -646,6 +987,10 @@ int vmm_map_page(
 int vmm_unmap_page(uintptr_t virt_addr) {
     uint32_t flags = 0U;
     int kernel_result;
+
+    if (vmm_dir_index(virt_addr) == VMM_TEMP_DIR_INDEX) {
+        return -3;
+    }
 
     if ((virt_addr & (PAGE_SIZE - 1U)) != 0U) {
         return -2;

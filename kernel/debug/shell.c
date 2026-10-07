@@ -644,9 +644,95 @@ static void shell_cmd_krealloc_slot(const char *arg) {
     vga_puts("\n");
 }
 
+static void shell_cmd_tmptest(void) {
+    uint32_t src_frame;
+    uint32_t dst_frame;
+    uint8_t pattern[32];
+    uint8_t readback[32];
+    uint8_t zero_check[32];
+    uint8_t ok = 1U;
+
+    if (!vmm_temp_window_is_ready()) {
+        klog_warn("temporary mapping window unavailable");
+        return;
+    }
+
+    src_frame = pmm_alloc_frame_above(0x01000000U);
+    if (src_frame == 0U) {
+        klog_warn("no free frame above 16 MiB");
+        return;
+    }
+
+    dst_frame = pmm_alloc_frame_above(0x01000000U);
+    if (dst_frame == 0U) {
+        pmm_free_frame(src_frame);
+        klog_warn("second high frame unavailable");
+        return;
+    }
+
+    for (uint32_t i = 0U; i < sizeof(pattern); ++i) {
+        pattern[i] = (uint8_t)(0x31U + (i * 7U));
+        readback[i] = 0U;
+        zero_check[i] = 0xFFU;
+    }
+
+    if (vmm_copy_to_phys(
+            (uintptr_t)src_frame + 0x123U,
+            pattern,
+            sizeof(pattern)) != 0 ||
+        vmm_copy_phys(
+            (uintptr_t)dst_frame + 0x2A5U,
+            (uintptr_t)src_frame + 0x123U,
+            sizeof(pattern)) != 0 ||
+        vmm_copy_from_phys(
+            readback,
+            (uintptr_t)dst_frame + 0x2A5U,
+            sizeof(readback)) != 0) {
+        ok = 0U;
+    }
+
+    if (ok) {
+        for (uint32_t i = 0U; i < sizeof(pattern); ++i) {
+            if (readback[i] != pattern[i]) {
+                ok = 0U;
+                break;
+            }
+        }
+    }
+
+    if (ok &&
+        vmm_zero_phys(
+            (uintptr_t)dst_frame + 0x2A5U,
+            sizeof(zero_check)) == 0 &&
+        vmm_copy_from_phys(
+            zero_check,
+            (uintptr_t)dst_frame + 0x2A5U,
+            sizeof(zero_check)) == 0) {
+        for (uint32_t i = 0U; i < sizeof(zero_check); ++i) {
+            if (zero_check[i] != 0U) {
+                ok = 0U;
+                break;
+            }
+        }
+    } else {
+        ok = 0U;
+    }
+
+    vga_puts("tmptest: src=");
+    vga_puthex(src_frame);
+    vga_puts(" dst=");
+    vga_puthex(dst_frame);
+    vga_puts(" result=");
+    vga_puts(ok ? "HIGH-FRAME OK" : "FAILED");
+    vga_puts("\n");
+
+    pmm_free_frame(dst_frame);
+    pmm_free_frame(src_frame);
+}
+
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task ps pmm vmm wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp lastexit waittest\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
@@ -722,7 +808,11 @@ static void shell_run_command(const char *cmd) {
         vga_puthex(vmm_kernel_cr3());
         vga_puts(" spaces=");
         vga_putdec(vmm_address_space_count());
+        vga_puts(" temp=");
+        vga_puts(vmm_temp_window_is_ready() ? "ON" : "OFF");
         vga_puts("\n");
+    } else if (str_eq(cmd, "tmptest")) {
+        shell_cmd_tmptest();
     } else if (str_eq(cmd, "wp")) {
         vga_puts("CR0.WP=");
         vga_puts(vmm_wp_is_enabled() ? "ON" : "OFF");

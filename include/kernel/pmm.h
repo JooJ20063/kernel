@@ -9,6 +9,7 @@ void pmm_init_from_multiboot(uint32_t mb_info_addr, uintptr_t kernel_start, uint
 
 uint32_t pmm_alloc_frame(void);
 uint32_t pmm_alloc_frame_below(uint32_t limit_addr);
+uint32_t pmm_alloc_frame_above(uint32_t min_addr);
 void pmm_free_frame(uint32_t frame_addr);
 
 uint32_t pmm_alloc_table_frame(void);
