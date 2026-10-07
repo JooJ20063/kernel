@@ -42,6 +42,7 @@ static uint32_t ramfs_write(fs_node_t *node, uint32_t offset, uint32_t size, con
 static fs_node_t *ramfs_readdir(fs_node_t *node, uint32_t index);
 static fs_node_t *ramfs_finddir(fs_node_t *node, const char *name);
 static fs_node_t *ramfs_create(fs_node_t *node, const char *name, uint32_t flags);
+static int ramfs_remove(fs_node_t *node, const char *name);
 
 static void mem_zero(uint8_t *dst, uint32_t size) {
     for (uint32_t i = 0U; i < size; ++i) {
@@ -198,6 +199,42 @@ static void ramfs_link_child(struct ramfs_entry *parent, struct ramfs_entry *chi
     parent->last_child = child;
 }
 
+static int ramfs_unlink_child(
+    struct ramfs_entry *parent,
+    struct ramfs_entry *child
+) {
+    struct ramfs_entry *cur;
+    struct ramfs_entry *prev = 0;
+
+    if (parent == 0 || child == 0) {
+        return -1;
+    }
+
+    cur = parent->first_child;
+    while (cur != 0 && cur != child) {
+        prev = cur;
+        cur = cur->next_sibling;
+    }
+
+    if (cur == 0) {
+        return -1;
+    }
+
+    if (prev == 0) {
+        parent->first_child = child->next_sibling;
+    } else {
+        prev->next_sibling = child->next_sibling;
+    }
+
+    if (parent->last_child == child) {
+        parent->last_child = prev;
+    }
+
+    child->parent = 0;
+    child->next_sibling = 0;
+    return 0;
+}
+
 static void ramfs_noop(fs_node_t *node) {
     (void)node;
 }
@@ -253,6 +290,7 @@ static struct ramfs_entry *ramfs_create_entry(
         entry->node.readdir = ramfs_readdir;
         entry->node.finddir = ramfs_finddir;
         entry->node.create = ramfs_create;
+        entry->node.remove = ramfs_remove;
     } else {
         entry->node.flags = FS_FILE | (writable ? FS_WRITABLE : 0U);
         entry->node.read = ramfs_read;
@@ -448,6 +486,43 @@ static fs_node_t *ramfs_create(fs_node_t *node, const char *name, uint32_t flags
     return entry != 0 ? &entry->node : 0;
 }
 
+static int ramfs_remove(fs_node_t *node, const char *name) {
+    struct ramfs_entry *parent;
+    struct ramfs_entry *child;
+
+    if (node == 0 || name == 0 ||
+        (node->flags & FS_DIRECTORY) == 0U) {
+        return -1;
+    }
+
+    parent = ramfs_entry_from_node(node);
+    if (parent == 0) {
+        return -1;
+    }
+
+    child = ramfs_find_child_entry(parent, name);
+    if (child == 0) {
+        return -2;
+    }
+
+    if ((child->node.flags & FS_DIRECTORY) != 0U &&
+        child->first_child != 0) {
+        return -3;
+    }
+
+    if (ramfs_unlink_child(parent, child) != 0) {
+        return -4;
+    }
+
+    if (child->writable != 0U &&
+        child->data_ptr != 0U) {
+        kfree((void *)(uintptr_t)child->data_ptr);
+    }
+
+    kfree(child);
+    return 0;
+}
+
 static int ramfs_add_tar_path(const char *path, uint8_t directory, uintptr_t data_ptr, uint32_t size) {
     struct ramfs_entry *parent = &ramfs_root_entry;
     const char *cursor = path;
@@ -534,6 +609,7 @@ void init_ramfs(uintptr_t start, uintptr_t end) {
     ramfs_root_entry.node.readdir = ramfs_readdir;
     ramfs_root_entry.node.finddir = ramfs_finddir;
     ramfs_root_entry.node.create = ramfs_create;
+    ramfs_root_entry.node.remove = ramfs_remove;
     ramfs_root_entry.node.open = ramfs_noop;
     ramfs_root_entry.node.close = ramfs_noop;
     ramfs_root_entry.node.device = &ramfs_root_entry;
