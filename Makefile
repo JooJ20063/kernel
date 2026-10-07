@@ -47,8 +47,8 @@ ASM_SRCS := \
 	arch/x86/boot/isr.s \
 	arch/x86/boot/irq.s \
 	arch/x86/boot/idt_descriptor.s \
-	user/user_test.s \
-	user/enter_ring3.s 
+	tests/ring3/user_test.s \
+	tests/ring3/enter_ring3.s 
 
 
 C_OBJS := $(addprefix $(BUILD_DIR)/,$(C_SRCS:.c=.o))
