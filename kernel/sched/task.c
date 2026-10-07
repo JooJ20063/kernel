@@ -180,6 +180,7 @@ void sched_init(uint32_t quantum_ticks) {
     idle_task.fpu_storage = 0;
     idle_task.fpu_area = 0;
     idle_task.fpu_initialized = 0;
+    fd_table_init(&idle_task.fds);
 
     add_task(&idle_task);
 
@@ -592,6 +593,7 @@ int sched_create_kernel_task(const char *name, void (*entry)(void)) {
     add_task(task);
 
     task->cr3 = 0;
+    fd_table_init(&task->fds);
     fpu_init_task(task);
 
     return (int)task->pid;
@@ -668,6 +670,7 @@ int sched_create_user_task(
      */
     task->cr3 = 0;
 
+    fd_table_init(&task->fds);
     add_task(task);
     fpu_init_task(task);
 
@@ -892,6 +895,7 @@ void task_yield(void) {
 void task_exit_code(int32_t code) {
     if (current != 0) {
         current->exit_code = code;
+        fd_table_close_all(&current->fds);
         current->block_reason = TASK_BLOCK_NONE;
         current->wake_tick = 0;
         current->state = TASK_ZOMBIE;
@@ -904,6 +908,21 @@ void task_exit_code(int32_t code) {
 
 void task_exit(void) {
     task_exit_code(0);
+}
+
+registers_t *task_exit_from_exception(registers_t *regs, int32_t exit_code) {
+    if (current == 0 || current == &idle_task || regs == 0) {
+        return regs;
+    }
+
+    current->context = regs;
+    current->exit_code = exit_code;
+    fd_table_close_all(&current->fds);
+    current->block_reason = TASK_BLOCK_NONE;
+    current->wake_tick = 0;
+    current->state = TASK_ZOMBIE;
+
+    return sched_yield_irq(regs);
 }
 
 task_t *sched_current_task_ptr(void) {

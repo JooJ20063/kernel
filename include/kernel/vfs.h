@@ -4,6 +4,7 @@
 
 #define FS_FILE      0x01U
 #define FS_DIRECTORY 0x02U
+#define FS_WRITABLE  0x04U
 
 typedef struct fs_node fs_node_t;
 

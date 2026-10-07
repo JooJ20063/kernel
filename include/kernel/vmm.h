@@ -14,4 +14,4 @@ int vmm_map_page(uintptr_t virt_addr, uintptr_t phys_addr, uint32_t flags);
 int vmm_unmap_page(uintptr_t virt_addr);
 uint8_t vmm_is_mapped(uintptr_t virt_addr);
 uintptr_t vmm_translate(uintptr_t virt_addr);
-
+int vmm_get_page_flags(uintptr_t virt_addr, uint32_t *flags_out);

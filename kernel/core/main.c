@@ -141,8 +141,25 @@ static uint32_t read_cr2(void) {
     return value;
 }
 
-static void page_fault_handler(registers_t *r) {
+static registers_t *page_fault_handler(registers_t *r) {
     uint32_t fault_addr = read_cr2();
+
+    /*
+     * The low two bits of CS contain the CPL of the interrupted context.
+     * A userspace page fault terminates only the offending task; a kernel
+     * page fault remains fatal because continuing could corrupt the system.
+     */
+    if ((r->cs & 0x3U) == 0x3U) {
+        vga_puts("[user fault] pid=");
+        vga_putdec(sched_current_pid());
+        vga_puts(" page fault at ");
+        vga_puthex(fault_addr);
+        vga_puts(" err=");
+        vga_puthex(r->err);
+        vga_puts("; task terminated\n");
+
+        return task_exit_from_exception(r, -14);
+    }
 
     vga_set_color(0x0F, 0x04);
     vga_clear();
@@ -192,6 +209,55 @@ static void page_fault_handler(registers_t *r) {
 }
 
 
+static int user_exception_is_recoverable(uint32_t vector) {
+    switch (vector) {
+        case 0:  /* #DE - Divide Error */
+        case 1:  /* #DB - Debug */
+        case 3:  /* #BP - Breakpoint */
+        case 4:  /* #OF - Overflow */
+        case 5:  /* #BR - BOUND Range Exceeded */
+        case 6:  /* #UD - Invalid Opcode */
+        case 10: /* #TS - Invalid TSS */
+        case 11: /* #NP - Segment Not Present */
+        case 12: /* #SS - Stack Segment Fault */
+        case 13: /* #GP - General Protection */
+        case 14: /* #PF - Page Fault */
+        case 16: /* #MF - x87 Floating-Point */
+        case 17: /* #AC - Alignment Check */
+        case 19: /* #XM - SIMD Floating-Point */
+        case 21: /* #CP - Control Protection */
+            return 1;
+
+        /*
+         * NMI (#2), #DF (#8), #MC (#18) and reserved/platform vectors
+         * remain kernel-fatal. #NM (#7) is handled separately by lazy FPU.
+         */
+        default:
+            return 0;
+    }
+}
+
+static registers_t *user_exception_handler(registers_t *r) {
+    const char *name = "exception";
+
+    if (r->int_no < 32U) {
+        name = exc[r->int_no].name;
+    }
+
+    vga_puts("[user fault] pid=");
+    vga_putdec(sched_current_pid());
+    vga_puts(" ");
+    vga_puts(name);
+    vga_puts(" vector=");
+    vga_putdec(r->int_no);
+    vga_puts(" err=");
+    vga_puthex(r->err);
+    vga_puts("; task terminated\n");
+
+    return task_exit_from_exception(r, -(int32_t)r->int_no);
+}
+
+
 registers_t *isr_handler_c(registers_t *r) {
     if (r->int_no == 7) {
         fpu_handle_nm();
@@ -203,13 +269,18 @@ registers_t *isr_handler_c(registers_t *r) {
     }
 
     if (r->int_no == 14) {
-        page_fault_handler(r);
-        return r;
+        return page_fault_handler(r);
+    }
+
+    if (r->int_no < 32U &&
+        (r->cs & 0x3U) == 0x3U &&
+        user_exception_is_recoverable(r->int_no)) {
+        return user_exception_handler(r);
     }
 
     const char *reason = "Unhandled exception";
 
-    if (r->int_no < 32) {
+    if (r->int_no < 32U) {
         reason = exc[r->int_no].detail;
     }
 

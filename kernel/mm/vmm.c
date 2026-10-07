@@ -218,3 +218,53 @@ uintptr_t vmm_translate(uintptr_t virt_addr) {
 
     return (uintptr_t)(pte & PAGE_FRAME_MASK) | (virt_addr & 0xFFFU);
 }
+
+int vmm_get_page_flags(uintptr_t virt_addr, uint32_t *flags_out) {
+    uint32_t dir_idx;
+    uint32_t table_idx;
+    uint32_t *table;
+    uint32_t pde;
+    uint32_t pte;
+    uint32_t flags;
+
+    if (flags_out == 0) {
+        return -1;
+    }
+
+    dir_idx = vmm_dir_index(virt_addr);
+    table_idx = vmm_table_index(virt_addr);
+
+    if (dir_idx >= PAGE_ENTRIES) {
+        return -1;
+    }
+
+    pde = page_directory[dir_idx];
+    if ((pde & VMM_PAGE_PRESENT) == 0U) {
+        return -1;
+    }
+
+    table = vmm_get_table(dir_idx);
+    if (table == 0) {
+        return -1;
+    }
+
+    pte = table[table_idx];
+    if ((pte & VMM_PAGE_PRESENT) == 0U) {
+        return -1;
+    }
+
+    flags = VMM_PAGE_PRESENT;
+
+    if ((pde & VMM_PAGE_USER) != 0U &&
+        (pte & VMM_PAGE_USER) != 0U) {
+        flags |= VMM_PAGE_USER;
+    }
+
+    if ((pde & VMM_PAGE_RW) != 0U &&
+        (pte & VMM_PAGE_RW) != 0U) {
+        flags |= VMM_PAGE_RW;
+    }
+
+    *flags_out = flags;
+    return 0;
+}

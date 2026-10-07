@@ -2,6 +2,71 @@
 #include <kernel/vga.h>
 #include <kernel/task.h>
 #include <kernel/sched.h>
+#include <kernel/uaccess.h>
+#include <kernel/fd.h>
+#include <kernel/ramfs.h>
+#include <czk/errno.h>
+#include <czk/fcntl.h>
+#include <czk/seek.h>
+#include <czk/stat.h>
+#include <czk/dirent.h>
+
+static uint32_t syscall_error(uint32_t error_number) {
+    return (uint32_t)(-(int32_t)error_number);
+}
+
+static void syscall_dirent_from_node(
+    czk_dirent_t *dirent,
+    const fs_node_t *node
+) {
+    uint32_t i = 0U;
+
+    while (i < CZK_DIRENT_NAME_MAX) {
+        dirent->d_name[i] = 0;
+        i++;
+    }
+
+    i = 0U;
+    while (i + 1U < CZK_DIRENT_NAME_MAX && node->name[i] != 0) {
+        dirent->d_name[i] = node->name[i];
+        i++;
+    }
+
+    dirent->d_name[i] = 0;
+    dirent->d_flags = node->flags;
+    dirent->d_size = node->size;
+}
+
+static int syscall_open_access(uint32_t flags, uint32_t *access_out) {
+    uint32_t mode;
+
+    if (access_out == 0) {
+        return -1;
+    }
+
+    if ((flags & ~(CZK_O_ACCMODE | CZK_O_CREAT)) != 0U) {
+        return -1;
+    }
+
+    mode = flags & CZK_O_ACCMODE;
+
+    switch (mode) {
+        case CZK_O_RDONLY:
+            *access_out = FD_ACCESS_READ;
+            return 0;
+
+        case CZK_O_WRONLY:
+            *access_out = FD_ACCESS_WRITE;
+            return 0;
+
+        case CZK_O_RDWR:
+            *access_out = FD_ACCESS_READ | FD_ACCESS_WRITE;
+            return 0;
+
+        default:
+            return -1;
+    }
+}
 
 registers_t *syscall_handler(registers_t *regs) {
     if (regs == 0) {
@@ -11,19 +76,63 @@ registers_t *syscall_handler(registers_t *regs) {
     switch (regs->eax) {
         case SYS_WRITE: {
             uint32_t fd = regs->ebx;
-            const char *buf = (const char *)(uintptr_t)regs->ecx;
+            const uint8_t *buf =
+                (const uint8_t *)(uintptr_t)regs->ecx;
             uint32_t len = regs->edx;
+            uint32_t offset = 0U;
+            uint8_t kernel_buf[128];
+            task_t *task = sched_current_task_ptr();
 
-            if (fd != 1 || buf == 0) {
-                regs->eax = 0xFFFFFFFFU;
+            if (task == 0 || !fd_is_writable(&task->fds, fd)) {
+                regs->eax = syscall_error(CZK_EBADF);
                 break;
             }
 
-            for (uint32_t i = 0; i < len; i++) {
-                vga_putc(buf[i]);
+            /*
+             * Validate the whole userspace range before producing output.
+             * This prevents a write from partially succeeding and then
+             * discovering that a later page is not accessible to Ring 3.
+             */
+            if (!user_ptr_valid(buf, len, 0)) {
+                regs->eax = syscall_error(CZK_EFAULT);
+                break;
             }
 
-            regs->eax = len;
+            while (offset < len) {
+                uint32_t remaining = len - offset;
+                uint32_t chunk = remaining;
+                int32_t written;
+
+                if (chunk > (uint32_t)sizeof(kernel_buf)) {
+                    chunk = (uint32_t)sizeof(kernel_buf);
+                }
+
+                if (copy_from_user(
+                        kernel_buf,
+                        (const void *)((uintptr_t)buf + offset),
+                        chunk) != 0) {
+                    regs->eax = syscall_error(CZK_EFAULT);
+                    break;
+                }
+
+                written = fd_write(&task->fds, fd, kernel_buf, chunk);
+                if (written < 0) {
+                    regs->eax = syscall_error(CZK_EBADF);
+                    break;
+                }
+
+                offset += (uint32_t)written;
+
+                if ((uint32_t)written < chunk) {
+                    regs->eax = offset;
+                    break;
+                }
+            }
+
+            if (offset == len) {
+                regs->eax = len;
+            }
+
             break;
         }
 
@@ -52,16 +161,302 @@ registers_t *syscall_handler(registers_t *regs) {
             return sched_yield_irq(regs);
         
         case SYS_WAIT: {
+            int32_t *user_status =
+                (int32_t *)(uintptr_t)regs->ebx;
             int32_t status = 0;
-            int32_t pid = task_wait_child(&status);
+            int32_t pid;
+
+            /*
+             * Validate the userspace destination before reaping the child.
+             * A bad status pointer must not consume a zombie process.
+             * A null pointer is valid and behaves like wait(NULL).
+             */
+            if (user_status != 0 &&
+                !user_ptr_valid(user_status, sizeof(status), 1)) {
+                regs->eax = syscall_error(CZK_EFAULT);
+                break;
+            }
+
+            pid = task_wait_child(&status);
+            if (pid < 0) {
+                regs->eax = syscall_error(CZK_ECHILD);
+                break;
+            }
+
+            if (user_status != 0 &&
+                copy_to_user(user_status, &status, sizeof(status)) != 0) {
+                regs->eax = syscall_error(CZK_EFAULT);
+                break;
+            }
 
             regs->eax = (uint32_t)pid;
-            regs->edx = (uint32_t)status;
+            break;
+        }
+
+        case SYS_OPEN: {
+            const char *user_path =
+                (const char *)(uintptr_t)regs->ebx;
+            uint32_t flags = regs->ecx;
+            uint32_t access;
+            char path[128];
+            int copy_result;
+            fs_node_t *node;
+            int32_t fd;
+            task_t *task = sched_current_task_ptr();
+
+            if (task == 0) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            if (syscall_open_access(flags, &access) != 0) {
+                regs->eax = syscall_error(CZK_EINVAL);
+                break;
+            }
+
+            copy_result = copy_string_from_user(
+                path,
+                user_path,
+                sizeof(path)
+            );
+
+            if (copy_result == -1) {
+                regs->eax = syscall_error(CZK_EFAULT);
+                break;
+            }
+
+            if (copy_result == -2) {
+                regs->eax = syscall_error(CZK_ENAMETOOLONG);
+                break;
+            }
+
+            if (path[0] == 0) {
+                regs->eax = syscall_error(CZK_EINVAL);
+                break;
+            }
+
+            if (path[0] == '/' && path[1] == 0) {
+                node = ramfs_root();
+            } else {
+                node = ramfs_find(path);
+            }
+
+            if (node == 0 && (flags & CZK_O_CREAT) != 0U) {
+                node = ramfs_touch(path);
+                if (node == 0) {
+                    regs->eax = syscall_error(CZK_ENOMEM);
+                    break;
+                }
+            }
+
+            if (node == 0) {
+                regs->eax = syscall_error(CZK_ENOENT);
+                break;
+            }
+
+            fd = fd_open_vfs(&task->fds, node, access);
+            if (fd == -1) {
+                regs->eax = syscall_error(CZK_EMFILE);
+                break;
+            }
+
+            if (fd == -2) {
+                regs->eax = syscall_error(CZK_EACCES);
+                break;
+            }
+
+            regs->eax = (uint32_t)fd;
+            break;
+        }
+
+        case SYS_READ: {
+            uint32_t fd = regs->ebx;
+            uint8_t *user_buf =
+                (uint8_t *)(uintptr_t)regs->ecx;
+            uint32_t len = regs->edx;
+            uint32_t total = 0U;
+            uint8_t kernel_buf[128];
+            task_t *task = sched_current_task_ptr();
+
+            if (task == 0 || !fd_is_readable(&task->fds, fd)) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            if (!user_ptr_valid(user_buf, len, 1)) {
+                regs->eax = syscall_error(CZK_EFAULT);
+                break;
+            }
+
+            while (total < len) {
+                uint32_t remaining = len - total;
+                uint32_t chunk = remaining;
+                int32_t count;
+
+                if (chunk > (uint32_t)sizeof(kernel_buf)) {
+                    chunk = (uint32_t)sizeof(kernel_buf);
+                }
+
+                count = fd_read(&task->fds, fd, kernel_buf, chunk);
+                if (count < 0) {
+                    regs->eax = syscall_error(CZK_EBADF);
+                    break;
+                }
+
+                if (count == 0) {
+                    regs->eax = total;
+                    break;
+                }
+
+                if (copy_to_user(
+                        (void *)((uintptr_t)user_buf + total),
+                        kernel_buf,
+                        (uint32_t)count) != 0) {
+                    regs->eax = syscall_error(CZK_EFAULT);
+                    break;
+                }
+
+                total += (uint32_t)count;
+
+                if ((uint32_t)count < chunk) {
+                    regs->eax = total;
+                    break;
+                }
+            }
+
+            if (total == len) {
+                regs->eax = total;
+            }
+
+            break;
+        }
+
+        case SYS_CLOSE: {
+            uint32_t fd = regs->ebx;
+            task_t *task = sched_current_task_ptr();
+
+            if (task == 0 || fd_close(&task->fds, fd) != 0) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            regs->eax = 0U;
+            break;
+        }
+
+        case SYS_LSEEK: {
+            uint32_t fd = regs->ebx;
+            int32_t offset = (int32_t)regs->ecx;
+            uint32_t whence = regs->edx;
+            uint32_t new_offset = 0U;
+            int32_t result;
+            task_t *task = sched_current_task_ptr();
+
+            if (task == 0) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            result = fd_seek(
+                &task->fds,
+                fd,
+                offset,
+                whence,
+                &new_offset
+            );
+
+            if (result == -1) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            if (result == -2) {
+                regs->eax = syscall_error(CZK_ESPIPE);
+                break;
+            }
+
+            if (result == -3) {
+                regs->eax = syscall_error(CZK_EINVAL);
+                break;
+            }
+
+            regs->eax = new_offset;
+            break;
+        }
+
+        case SYS_FSTAT: {
+            uint32_t fd = regs->ebx;
+            czk_stat_t *user_stat =
+                (czk_stat_t *)(uintptr_t)regs->ecx;
+            czk_stat_t stat;
+            task_t *task = sched_current_task_ptr();
+
+            if (task == 0 ||
+                fd_stat(
+                    &task->fds,
+                    fd,
+                    &stat.st_size,
+                    &stat.st_flags) != 0) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            if (copy_to_user(user_stat, &stat, sizeof(stat)) != 0) {
+                regs->eax = syscall_error(CZK_EFAULT);
+                break;
+            }
+
+            regs->eax = 0U;
+            break;
+        }
+
+        case SYS_READDIR: {
+            uint32_t fd = regs->ebx;
+            czk_dirent_t *user_dirent =
+                (czk_dirent_t *)(uintptr_t)regs->ecx;
+            czk_dirent_t dirent;
+            fs_node_t *node = 0;
+            int32_t result;
+            task_t *task = sched_current_task_ptr();
+
+            if (task == 0) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            result = fd_readdir(&task->fds, fd, &node);
+
+            if (result == -1) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            if (result == -2) {
+                regs->eax = syscall_error(CZK_ENOTDIR);
+                break;
+            }
+
+            if (result == 0) {
+                regs->eax = 0U;
+                break;
+            }
+
+            syscall_dirent_from_node(&dirent, node);
+
+            if (copy_to_user(
+                    user_dirent,
+                    &dirent,
+                    sizeof(dirent)) != 0) {
+                regs->eax = syscall_error(CZK_EFAULT);
+                break;
+            }
+
+            regs->eax = 1U;
             break;
         }
 
         default:
-            regs->eax = 0xFFFFFFFFU;
+            regs->eax = syscall_error(CZK_ENOSYS);
             break;
     }
 

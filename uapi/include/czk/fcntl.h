@@ -1,0 +1,10 @@
+#ifndef CZK_UAPI_FCNTL_H
+#define CZK_UAPI_FCNTL_H
+
+#define CZK_O_RDONLY 0x0000U
+#define CZK_O_WRONLY 0x0001U
+#define CZK_O_RDWR   0x0002U
+#define CZK_O_ACCMODE 0x0003U
+#define CZK_O_CREAT  0x0040U
+
+#endif

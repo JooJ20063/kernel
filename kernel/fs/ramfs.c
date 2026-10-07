@@ -156,6 +156,10 @@ static uint32_t ramfs_write(fs_node_t *node, uint32_t offset, uint32_t size, con
         return 0;
     }
 
+    if (size > 0xFFFFFFFFU - offset) {
+        return 0;
+    }
+
     need = offset + size;
 
     if (need > entry->capacity) {
@@ -237,7 +241,7 @@ static fs_node_t *ramfs_add_writable_file(const char *name) {
     mem_zero(data, RAMFS_NEW_FILE_CAPACITY);
 
     str_copy_limit(entry->node.name, name, sizeof(entry->node.name));
-    entry->node.flags = FS_FILE;
+    entry->node.flags = FS_FILE | FS_WRITABLE;
     entry->node.size = 0;
     entry->node.read = ramfs_read;
     entry->node.write = ramfs_write;
