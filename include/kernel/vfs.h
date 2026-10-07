@@ -17,6 +17,7 @@ typedef void (*close_type_t)(fs_node_t *node);
 typedef fs_node_t *(*readdir_type_t)(fs_node_t *node, uint32_t index);
 typedef fs_node_t *(*finddir_type_t)(fs_node_t *node, const char *name);
 typedef fs_node_t *(*create_type_t)(fs_node_t *node, const char *name, uint32_t flags);
+typedef int (*remove_type_t)(fs_node_t *node, const char *name);
 
 struct fs_node {
     char name[VFS_NAME_MAX];
@@ -29,6 +30,7 @@ struct fs_node {
     readdir_type_t readdir;
     finddir_type_t finddir;
     create_type_t create;
+    remove_type_t remove;
     void *device;
 };
 
@@ -39,8 +41,14 @@ void close_fs(fs_node_t *node);
 fs_node_t *readdir_fs(fs_node_t *node, uint32_t index);
 fs_node_t *finddir_fs(fs_node_t *node, const char *name);
 fs_node_t *create_fs(fs_node_t *node, const char *name, uint32_t flags);
+int remove_fs(fs_node_t *node, const char *name);
 
 void vfs_set_root(fs_node_t *root);
 fs_node_t *vfs_root(void);
 fs_node_t *vfs_resolve(const char *path);
 fs_node_t *vfs_create(const char *path, uint32_t flags);
+int vfs_remove(const char *path);
+
+int vfs_mount(const char *path, fs_node_t *root);
+int vfs_unmount(const char *path);
+uint32_t vfs_mount_count(void);

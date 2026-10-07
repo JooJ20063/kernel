@@ -10,6 +10,7 @@
 #include <kernel/klog.h>
 #include <kernel/shell.h>
 #include <kernel/ramfs.h>
+#include <kernel/devfs.h>
 #include <kernel/syscall.h>
 #include <kernel/sched.h>
 #include <arch/x86/fpu.h>
@@ -324,6 +325,9 @@ void kernel_main(uint32_t mb_info_addr) {
    map_user_sections();
    kmalloc_init();
    init_ramfs(0, 0);
+   if (devfs_init() != 0) {
+       kernel_panic("failed to mount devfs", 0);
+   }
 
    klog_info("interrupts configured");
    vga_puts("PMM free frames=");
@@ -332,7 +336,7 @@ void kernel_main(uint32_t mb_info_addr) {
    vga_puts(vmm_is_enabled() ? "ON" : "OFF");
    vga_puts(" WP=");
    vga_puts(vmm_wp_is_enabled() ? "ON" : "OFF");
-   vga_puts(" null-guard=ON ramfs=ON\n");
+   vga_puts(" null-guard=ON ramfs=ON devfs=ON\n");
 
    asm volatile ("sti");
 

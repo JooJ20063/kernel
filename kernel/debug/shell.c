@@ -407,7 +407,6 @@ static void shell_write_text_file(const char *name, const char *text) {
         return;
     }
 
-    entry->size = n;
     vga_puts("ok: ");
     vga_puts(name);
     vga_puts(" <= ");
@@ -778,9 +777,140 @@ static void shell_cmd_tmptest(void) {
     pmm_free_frame(src_frame);
 }
 
+static void shell_cmd_mounttest(void) {
+    fs_node_t *source;
+    fs_node_t *target;
+    fs_node_t *probe;
+    fs_node_t *mounted_root;
+    fs_node_t *mounted_probe;
+    uint32_t baseline_mounts = vfs_mount_count();
+    uint8_t ok = 1U;
+
+    source = vfs_resolve("/tmp");
+    if (source == 0) {
+        klog_warn("mounttest: /tmp unavailable");
+        return;
+    }
+
+    target = vfs_create("/mnttest", FS_DIRECTORY);
+    if (target == 0) {
+        klog_warn("mounttest: failed to create /mnttest");
+        return;
+    }
+
+    probe = vfs_create(
+        "/tmp/__mount_probe",
+        FS_FILE | FS_WRITABLE
+    );
+    if (probe == 0) {
+        (void)vfs_remove("/mnttest");
+        klog_warn("mounttest: failed to create probe");
+        return;
+    }
+
+    if (vfs_mount("/mnttest", source) != 0) {
+        (void)vfs_remove("/tmp/__mount_probe");
+        (void)vfs_remove("/mnttest");
+        klog_warn("mounttest: mount failed");
+        return;
+    }
+
+    mounted_root = vfs_resolve("/mnttest");
+    mounted_probe =
+        vfs_resolve("/mnttest/__mount_probe");
+
+    if (mounted_root != source ||
+        mounted_probe != probe ||
+        vfs_mount_count() != baseline_mounts + 1U) {
+        ok = 0U;
+    }
+
+    if (vfs_unmount("/mnttest") != 0) {
+        ok = 0U;
+    }
+
+    if (vfs_resolve("/mnttest") != target ||
+        vfs_resolve("/mnttest/__mount_probe") != 0 ||
+        vfs_mount_count() != baseline_mounts) {
+        ok = 0U;
+    }
+
+    if (vfs_remove("/tmp/__mount_probe") != 0 ||
+        vfs_remove("/mnttest") != 0) {
+        ok = 0U;
+    }
+
+    if (vfs_resolve("/tmp/__mount_probe") != 0 ||
+        vfs_resolve("/mnttest") != 0) {
+        ok = 0U;
+    }
+
+    vga_puts("mounttest: result=");
+    vga_puts(ok ? "MOUNT OK" : "FAILED");
+    vga_puts("\n");
+}
+
+static void shell_cmd_devtest(void) {
+    fs_node_t *null_node = vfs_resolve("/dev/null");
+    fs_node_t *zero_node = vfs_resolve("/dev/zero");
+    uint8_t zero_buf[32];
+    static const uint8_t payload[] = "cruzeiro";
+    uint8_t ok = 1U;
+
+    if (null_node == 0 || zero_node == 0) {
+        ok = 0U;
+    }
+
+    if (ok &&
+        read_fs(
+            null_node,
+            0U,
+            sizeof(zero_buf),
+            zero_buf) != 0U) {
+        ok = 0U;
+    }
+
+    if (ok &&
+        write_fs(
+            null_node,
+            0U,
+            (uint32_t)(sizeof(payload) - 1U),
+            payload) !=
+            (uint32_t)(sizeof(payload) - 1U)) {
+        ok = 0U;
+    }
+
+    if (ok) {
+        for (uint32_t i = 0U; i < sizeof(zero_buf); ++i) {
+            zero_buf[i] = 0xA5U;
+        }
+
+        if (read_fs(
+                zero_node,
+                0U,
+                sizeof(zero_buf),
+                zero_buf) != sizeof(zero_buf)) {
+            ok = 0U;
+        }
+    }
+
+    if (ok) {
+        for (uint32_t i = 0U; i < sizeof(zero_buf); ++i) {
+            if (zero_buf[i] != 0U) {
+                ok = 0U;
+                break;
+            }
+        }
+    }
+
+    vga_puts("devtest: result=");
+    vga_puts(ok ? "DEVFS OK" : "FAILED");
+    vga_puts("\n");
+}
+
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
@@ -861,6 +991,10 @@ static void shell_run_command(const char *cmd) {
         vga_puts("\n");
     } else if (str_eq(cmd, "tmptest")) {
         shell_cmd_tmptest();
+    } else if (str_eq(cmd, "mounttest")) {
+        shell_cmd_mounttest();
+    } else if (str_eq(cmd, "devtest")) {
+        shell_cmd_devtest();
     } else if (str_eq(cmd, "wp")) {
         vga_puts("CR0.WP=");
         vga_puts(vmm_wp_is_enabled() ? "ON" : "OFF");
