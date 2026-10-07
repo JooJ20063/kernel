@@ -77,6 +77,15 @@ typedef struct {
     uint32_t load_segment_count;
 } elf32_image_info_t;
 
+typedef struct {
+    uint32_t cr3;
+    elf32_addr_t entry;
+    elf32_addr_t lowest_vaddr;
+    elf32_addr_t highest_vaddr;
+    uint32_t load_segment_count;
+    uint32_t mapped_page_count;
+} elf32_loaded_image_t;
+
 typedef enum {
     ELF32_OK = 0,
     ELF32_ERR_ARGUMENT = -1,
@@ -103,7 +112,15 @@ typedef enum {
     ELF32_ERR_NO_LOAD_SEGMENTS = -22,
     ELF32_ERR_INTERP_UNSUPPORTED = -23,
     ELF32_ERR_DYNAMIC_UNSUPPORTED = -24,
-    ELF32_ERR_ENTRY_NOT_EXECUTABLE = -25
+    ELF32_ERR_ENTRY_NOT_EXECUTABLE = -25,
+    ELF32_ERR_SEGMENT_USER_RANGE = -26,
+    ELF32_ERR_ADDRESS_CONFLICT = -27,
+    ELF32_ERR_NO_MEMORY = -28,
+    ELF32_ERR_MAP_FAILED = -29,
+    ELF32_ERR_SEGMENT_READ = -30,
+    ELF32_ERR_SEGMENT_COPY = -31,
+    ELF32_ERR_SEGMENT_ZERO = -32,
+    ELF32_ERR_PAGE_FLAGS = -33
 } elf32_status_t;
 
 int elf32_validate_header(
@@ -134,5 +151,12 @@ int elf32_inspect(
     elf32_ehdr_t *header_out,
     elf32_image_info_t *image_out
 );
+
+int elf32_load_image(
+    fs_node_t *node,
+    elf32_loaded_image_t *loaded_out
+);
+
+void elf32_unload_image(elf32_loaded_image_t *loaded);
 
 const char *elf32_status_string(int status);

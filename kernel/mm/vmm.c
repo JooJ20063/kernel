@@ -400,6 +400,51 @@ static int vmm_get_page_flags_in_directory(
     return 0;
 }
 
+static int vmm_set_page_flags_in_directory(
+    uint32_t *directory,
+    uintptr_t virt_addr,
+    uint32_t flags
+) {
+    uint32_t dir_idx;
+    uint32_t table_idx;
+    uint32_t *table;
+    uint32_t pte;
+
+    if (directory == 0 ||
+        (virt_addr & (PAGE_SIZE - 1U)) != 0U) {
+        return -1;
+    }
+
+    dir_idx = vmm_dir_index(virt_addr);
+    table_idx = vmm_table_index(virt_addr);
+    table = vmm_get_table_from_directory(directory, dir_idx);
+
+    if (table == 0) {
+        return -1;
+    }
+
+    pte = table[table_idx];
+    if ((pte & VMM_PAGE_PRESENT) == 0U) {
+        return -1;
+    }
+
+    table[table_idx] =
+        (pte & PAGE_FRAME_MASK) |
+        VMM_PAGE_PRESENT |
+        (flags & (VMM_PAGE_RW | VMM_PAGE_USER));
+
+    if ((flags & VMM_PAGE_USER) != 0U) {
+        directory[dir_idx] |= VMM_PAGE_USER;
+    }
+
+    if (vmm_enabled &&
+        directory == vmm_directory_from_cr3(vmm_read_cr3())) {
+        vmm_invlpg(virt_addr);
+    }
+
+    return 0;
+}
+
 static int vmm_register_address_space(uint32_t cr3) {
     if (address_space_count >= VMM_MAX_ADDRESS_SPACES) {
         return -1;
@@ -428,6 +473,18 @@ static void vmm_unregister_address_space(uint32_t cr3) {
             return;
         }
     }
+}
+
+static uint8_t vmm_address_space_registered(uint32_t cr3) {
+    uint32_t target = cr3 & PAGE_FRAME_MASK;
+
+    for (uint32_t i = 0U; i < address_space_count; ++i) {
+        if (address_spaces[i] == target) {
+            return 1U;
+        }
+    }
+
+    return 0U;
 }
 
 static void vmm_map_identity(uint32_t megabytes) {
@@ -938,6 +995,135 @@ int vmm_clone_user_range(
     }
 
     return 0;
+}
+
+int vmm_map_user_page(
+    uint32_t cr3,
+    uintptr_t virt_addr,
+    uintptr_t phys_addr,
+    uint32_t flags
+) {
+    uint32_t target = cr3 & PAGE_FRAME_MASK;
+    uint32_t *directory;
+
+    if (target == 0U ||
+        target == vmm_kernel_cr3() ||
+        !vmm_address_space_registered(target)) {
+        return -1;
+    }
+
+    if ((virt_addr & (PAGE_SIZE - 1U)) != 0U ||
+        (phys_addr & (PAGE_SIZE - 1U)) != 0U ||
+        virt_addr < VMM_USER_MIN_ADDR ||
+        virt_addr >= VMM_USER_MAX_ADDR) {
+        return -2;
+    }
+
+    directory = vmm_directory_from_cr3(target);
+
+    if (vmm_translate_in_directory(directory, virt_addr) != 0U) {
+        return -3;
+    }
+
+    return vmm_map_page_in_directory(
+        directory,
+        virt_addr,
+        phys_addr,
+        VMM_PAGE_USER | (flags & VMM_PAGE_RW)
+    );
+}
+
+int vmm_set_user_page_flags(
+    uint32_t cr3,
+    uintptr_t virt_addr,
+    uint32_t flags
+) {
+    uint32_t target = cr3 & PAGE_FRAME_MASK;
+    uint32_t *directory;
+    uint32_t current_flags;
+
+    if (target == 0U ||
+        target == vmm_kernel_cr3() ||
+        !vmm_address_space_registered(target)) {
+        return -1;
+    }
+
+    if ((virt_addr & (PAGE_SIZE - 1U)) != 0U ||
+        virt_addr < VMM_USER_MIN_ADDR ||
+        virt_addr >= VMM_USER_MAX_ADDR) {
+        return -2;
+    }
+
+    directory = vmm_directory_from_cr3(target);
+
+    if (vmm_get_page_flags_in_directory(
+            directory,
+            virt_addr,
+            &current_flags) != 0 ||
+        (current_flags & VMM_PAGE_USER) == 0U) {
+        return -3;
+    }
+
+    return vmm_set_page_flags_in_directory(
+        directory,
+        virt_addr,
+        VMM_PAGE_USER | (flags & VMM_PAGE_RW)
+    );
+}
+
+uintptr_t vmm_translate_address_space(
+    uint32_t cr3,
+    uintptr_t virt_addr
+) {
+    uint32_t target = cr3 & PAGE_FRAME_MASK;
+
+    if (target == vmm_kernel_cr3()) {
+        return vmm_translate_in_directory(
+            page_directory,
+            virt_addr
+        );
+    }
+
+    if (target == 0U ||
+        !vmm_address_space_registered(target)) {
+        return 0U;
+    }
+
+    return vmm_translate_in_directory(
+        vmm_directory_from_cr3(target),
+        virt_addr
+    );
+}
+
+int vmm_get_page_flags_address_space(
+    uint32_t cr3,
+    uintptr_t virt_addr,
+    uint32_t *flags_out
+) {
+    uint32_t target = cr3 & PAGE_FRAME_MASK;
+
+    if (flags_out == 0) {
+        return -1;
+    }
+
+    if (target == vmm_kernel_cr3()) {
+        return vmm_get_page_flags_in_directory(
+            page_directory,
+            virt_addr,
+            flags_out
+        );
+    }
+
+    if (target == 0U ||
+        !vmm_address_space_registered(target)) {
+        return -1;
+    }
+
+    return vmm_get_page_flags_in_directory(
+        vmm_directory_from_cr3(target),
+        virt_addr,
+        flags_out
+    );
 }
 
 int vmm_map_page(
