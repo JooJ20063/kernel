@@ -804,7 +804,7 @@ static int elf32_string_size(
     }
 
     for (uint32_t i = 0U;
-         i < ELF32_EXEC_MAX_STRING;
+         i < CZK_EXEC_MAX_STRING;
          ++i) {
         if (value[i] == 0) {
             *size_out = i + 1U;
@@ -902,13 +902,13 @@ static int elf32_build_initial_stack(
     uintptr_t stack_top = 0U;
     uintptr_t stack_bottom;
     uintptr_t sp;
-    uint32_t argv_addrs[ELF32_EXEC_MAX_ARGS];
-    uint32_t envp_addrs[ELF32_EXEC_MAX_ENVS];
+    uint32_t argv_addrs[CZK_EXEC_MAX_ARGS];
+    uint32_t envp_addrs[CZK_EXEC_MAX_ENVS];
     int status;
 
     if (stack_pointer_out == 0 ||
-        argc > ELF32_EXEC_MAX_ARGS ||
-        envc > ELF32_EXEC_MAX_ENVS ||
+        argc > CZK_EXEC_MAX_ARGS ||
+        envc > CZK_EXEC_MAX_ENVS ||
         (argc != 0U && argv == 0) ||
         (envc != 0U && envp == 0)) {
         return ELF32_ERR_STACK_ARGS;
@@ -980,7 +980,26 @@ static int elf32_build_initial_stack(
         argv_addrs[index] = (uint32_t)sp;
     }
 
+    /*
+     * ABI v1 requires the entry stack pointer to be 16-byte aligned.
+     * Padding lives between the pointer vectors and copied strings, so
+     * argc remains exactly at [ESP].
+     */
     sp &= ~(uintptr_t)0x3U;
+
+    {
+        uint32_t vector_bytes =
+            (argc + envc + 3U) * (uint32_t)sizeof(uint32_t);
+        uintptr_t required_mod =
+            (uintptr_t)(vector_bytes & (CZK_ABI_STACK_ALIGNMENT - 1U));
+
+        while ((sp & (CZK_ABI_STACK_ALIGNMENT - 1U)) != required_mod) {
+            if (sp < stack_bottom + sizeof(uint32_t)) {
+                return ELF32_ERR_STACK_ARGS;
+            }
+            sp -= sizeof(uint32_t);
+        }
+    }
 
     status = elf32_push_u32(cr3, stack_bottom, &sp, 0U);
     if (status != ELF32_OK) {
