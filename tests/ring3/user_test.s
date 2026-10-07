@@ -493,6 +493,13 @@ user_fault_test_entry:
 .section .userdata, "aw", @progbits
 .align 16
 
+.global syscall_test_message
+.global syscall_test_message_end
+syscall_test_message:
+    .ascii "hello from int 0x80\n"
+syscall_test_message_end:
+
+.align 16
 user_stack_bottom:
     .skip 4096
 
