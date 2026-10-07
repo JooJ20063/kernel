@@ -9,9 +9,32 @@
 #include <czk/fcntl.h>
 #include <czk/seek.h>
 #include <czk/stat.h>
+#include <czk/dirent.h>
 
 static uint32_t syscall_error(uint32_t error_number) {
     return (uint32_t)(-(int32_t)error_number);
+}
+
+static void syscall_dirent_from_node(
+    czk_dirent_t *dirent,
+    const fs_node_t *node
+) {
+    uint32_t i = 0U;
+
+    while (i < CZK_DIRENT_NAME_MAX) {
+        dirent->d_name[i] = 0;
+        i++;
+    }
+
+    i = 0U;
+    while (i + 1U < CZK_DIRENT_NAME_MAX && node->name[i] != 0) {
+        dirent->d_name[i] = node->name[i];
+        i++;
+    }
+
+    dirent->d_name[i] = 0;
+    dirent->d_flags = node->flags;
+    dirent->d_size = node->size;
 }
 
 static int syscall_open_access(uint32_t flags, uint32_t *access_out) {
@@ -212,7 +235,11 @@ registers_t *syscall_handler(registers_t *regs) {
                 break;
             }
 
-            node = ramfs_find(path);
+            if (path[0] == '/' && path[1] == 0) {
+                node = ramfs_root();
+            } else {
+                node = ramfs_find(path);
+            }
 
             if (node == 0 && (flags & CZK_O_CREAT) != 0U) {
                 node = ramfs_touch(path);
@@ -380,6 +407,51 @@ registers_t *syscall_handler(registers_t *regs) {
             }
 
             regs->eax = 0U;
+            break;
+        }
+
+        case SYS_READDIR: {
+            uint32_t fd = regs->ebx;
+            czk_dirent_t *user_dirent =
+                (czk_dirent_t *)(uintptr_t)regs->ecx;
+            czk_dirent_t dirent;
+            fs_node_t *node = 0;
+            int32_t result;
+            task_t *task = sched_current_task_ptr();
+
+            if (task == 0) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            result = fd_readdir(&task->fds, fd, &node);
+
+            if (result == -1) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            if (result == -2) {
+                regs->eax = syscall_error(CZK_ENOTDIR);
+                break;
+            }
+
+            if (result == 0) {
+                regs->eax = 0U;
+                break;
+            }
+
+            syscall_dirent_from_node(&dirent, node);
+
+            if (copy_to_user(
+                    user_dirent,
+                    &dirent,
+                    sizeof(dirent)) != 0) {
+                regs->eax = syscall_error(CZK_EFAULT);
+                break;
+            }
+
+            regs->eax = 1U;
             break;
         }
 
