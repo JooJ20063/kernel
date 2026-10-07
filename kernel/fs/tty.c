@@ -1,5 +1,6 @@
 #include <kernel/tty.h>
 #include <kernel/vga.h>
+#include <kernel/task.h>
 
 #define TTY1_INPUT_CAPACITY 256U
 
@@ -9,6 +10,7 @@ static volatile uint32_t tty1_head;
 static volatile uint32_t tty1_tail;
 static volatile uint32_t tty1_count;
 static volatile uint32_t tty1_drop_count;
+static wait_queue_t tty1_read_waiters;
 
 static uint32_t tty_irq_save_disable(void) {
     uint32_t flags;
@@ -50,15 +52,17 @@ static void str_copy_limit(char *dst, const char *src, uint32_t limit) {
     dst[i] = 0;
 }
 
+static int tty1_input_ready(void *ctx) {
+    (void)ctx;
+    return tty1_count > 0U;
+}
+
 static uint32_t tty1_read(
     fs_node_t *node,
     uint32_t offset,
     uint32_t size,
     uint8_t *buffer
 ) {
-    uint32_t read_count = 0U;
-    uint32_t flags;
-
     (void)node;
     (void)offset;
 
@@ -66,16 +70,41 @@ static uint32_t tty1_read(
         return 0U;
     }
 
-    flags = tty_irq_save_disable();
-
-    while (read_count < size && tty1_count > 0U) {
-        buffer[read_count++] = tty1_input[tty1_tail];
-        tty1_tail = (tty1_tail + 1U) % TTY1_INPUT_CAPACITY;
-        tty1_count--;
+    if (size == 0U) {
+        return 0U;
     }
 
-    tty_irq_restore(flags);
-    return read_count;
+    for (;;) {
+        uint32_t read_count = 0U;
+        uint32_t flags = tty_irq_save_disable();
+
+        while (read_count < size && tty1_count > 0U) {
+            buffer[read_count++] = tty1_input[tty1_tail];
+            tty1_tail = (tty1_tail + 1U) % TTY1_INPUT_CAPACITY;
+            tty1_count--;
+        }
+
+        tty_irq_restore(flags);
+
+        if (read_count > 0U) {
+            return read_count;
+        }
+
+        /*
+         * Recheck readiness atomically with queue insertion. This closes
+         * the classic empty-buffer -> sleep lost-wakeup race.
+         */
+        if (task_wait_until(
+                &tty1_read_waiters,
+                tty1_input_ready,
+                0) != 0) {
+            /*
+             * The bootstrap/idle context cannot sleep. Preserve the old
+             * non-blocking behavior for that context only.
+             */
+            return 0U;
+        }
+    }
 }
 
 static uint32_t tty1_write(
@@ -119,17 +148,28 @@ void tty1_init(void) {
     tty1_tail = 0U;
     tty1_count = 0U;
     tty1_drop_count = 0U;
+    wait_queue_init(&tty1_read_waiters);
 }
 
 void tty1_receive_char(char c) {
+    uint32_t flags = tty_irq_save_disable();
+
     if (tty1_count >= TTY1_INPUT_CAPACITY) {
         tty1_drop_count++;
+        tty_irq_restore(flags);
         return;
     }
 
     tty1_input[tty1_head] = (uint8_t)c;
     tty1_head = (tty1_head + 1U) % TTY1_INPUT_CAPACITY;
     tty1_count++;
+
+    /*
+     * One input byte is enough to make one blocked reader runnable.
+     * wait_queue_wake_one() is IRQ-safe even when called from IRQ1/COM1.
+     */
+    (void)wait_queue_wake_one(&tty1_read_waiters);
+    tty_irq_restore(flags);
 }
 
 void tty1_flush_input(void) {
