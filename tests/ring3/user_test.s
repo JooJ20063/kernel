@@ -237,6 +237,71 @@ fileio_test_failed:
 
 fileio_test_done:
 
+    # open("/", O_RDONLY)
+    mov $8, %eax
+    mov $root_path, %ebx
+    mov $CZK_O_RDONLY, %ecx
+    int $0x80
+
+    cmp $3, %eax
+    jl dirent_test_failed
+
+    mov %eax, %ebx
+
+    # readdir(fd, &dirent)
+    mov $13, %eax
+    mov $dirent_buffer, %ecx
+    int $0x80
+
+    cmp $1, %eax
+    jne dirent_test_failed
+
+    # The first entry must be the file created above: "ring3.txt".
+    cld
+    mov $fileio_path, %esi
+    mov $dirent_buffer, %edi
+    mov $10, %ecx
+    repe cmpsb
+    jne dirent_test_failed
+
+    # d_flags must include FS_FILE and d_size must match the payload.
+    testl $1, dirent_buffer+128
+    jz dirent_test_failed
+
+    cmpl $(fileio_payload_end-fileio_payload), dirent_buffer+132
+    jne dirent_test_failed
+
+    # There are no more entries in this RAMFS instance.
+    mov $13, %eax
+    mov $dirent_buffer, %ecx
+    int $0x80
+
+    test %eax, %eax
+    jne dirent_test_failed
+
+    # close(directory fd)
+    mov $10, %eax
+    int $0x80
+
+    test %eax, %eax
+    jne dirent_test_failed
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $dirent_ok, %ecx
+    mov $(dirent_ok_end-dirent_ok), %edx
+    int $0x80
+    jmp dirent_test_done
+
+dirent_test_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $dirent_fail, %ecx
+    mov $(dirent_fail_end-dirent_fail), %edx
+    int $0x80
+
+dirent_test_done:
+
     # stdout is not seekable.
     mov $11, %eax
     mov $1, %ebx
@@ -471,6 +536,21 @@ seek_stat_ok_end:
 seek_stat_fail:
     .ascii "fileio: lseek/fstat FAILED\n"
 seek_stat_fail_end:
+
+dirent_ok:
+    .ascii "fileio: readdir ok\n"
+dirent_ok_end:
+
+dirent_fail:
+    .ascii "fileio: readdir FAILED\n"
+dirent_fail_end:
+
+root_path:
+    .asciz "/"
+
+.align 16
+dirent_buffer:
+    .skip 136
 
 .align 16
 fileio_buffer:
