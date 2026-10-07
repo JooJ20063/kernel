@@ -242,6 +242,7 @@ The v1 native executable format is static ELF32 for i386:
 - machine: `EM_386`;
 - program headers are required;
 - at least one non-empty `PT_LOAD` is required;
+- zero-sized `PT_LOAD` entries (`p_filesz == p_memsz == 0`) are inert and ignored;
 - `PT_INTERP` is unsupported;
 - `PT_DYNAMIC` is unsupported;
 - relocations and PIE/`ET_DYN` are unsupported;
