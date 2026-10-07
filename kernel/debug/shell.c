@@ -7,7 +7,6 @@
 #include <kernel/sched.h>
 #include <kernel/panic.h>
 #include <kernel/vfs.h>
-#include <kernel/ramfs.h>
 #include <kernel/task.h>
 #include <kernel/syscall.h>
 #include <kernel/serial.h>
@@ -297,27 +296,48 @@ static void shell_cmd_panic(const char *arg) {
     klog_warn("panic usage: panic [int3|ud2|div0|null|int <n>]");
 }
 
-static void shell_cmd_ls(void) {
-    fs_node_t *root = ramfs_root();
-    uint32_t i = 0;
+static void shell_cmd_ls(const char *path) {
+    const char *target = (path == 0 || *path == 0) ? "/" : path;
+    fs_node_t *directory = vfs_resolve(target);
+    uint32_t i = 0U;
 
-    vga_puts("ramfs entries:\n");
+    if (directory == 0) {
+        klog_warn("diretorio nao encontrado");
+        return;
+    }
+
+    if ((directory->flags & FS_DIRECTORY) == 0U) {
+        klog_warn("ls: caminho nao e diretorio");
+        return;
+    }
+
+    vga_puts("entries ");
+    vga_puts(target);
+    vga_puts(":\n");
 
     for (;;) {
-        fs_node_t *entry = readdir_fs(root, i);
+        fs_node_t *entry = readdir_fs(directory, i);
+
         if (entry == 0) {
             break;
         }
 
         vga_puts(" - ");
         vga_puts(entry->name);
-        vga_puts(" (");
-        vga_putdec(entry->size);
-        vga_puts(" bytes)\n");
+
+        if ((entry->flags & FS_DIRECTORY) != 0U) {
+            vga_puts("/");
+        } else {
+            vga_puts(" (");
+            vga_putdec(entry->size);
+            vga_puts(" bytes)");
+        }
+
+        vga_puts("\n");
         i++;
     }
 
-    if (i == 0) {
+    if (i == 0U) {
         vga_puts("(vazio)\n");
     }
 }
@@ -330,23 +350,29 @@ static void shell_cmd_cat(const char *name) {
         return;
     }
 
-    entry = ramfs_find(name);
+    entry = vfs_resolve(name);
     if (entry == 0) {
         klog_warn("arquivo nao encontrado");
         return;
     }
 
+    if ((entry->flags & FS_FILE) == 0U) {
+        klog_warn("cat: caminho nao e arquivo");
+        return;
+    }
+
     {
         uint8_t buf[64];
-        uint32_t off = 0;
+        uint32_t off = 0U;
 
         while (off < entry->size) {
             uint32_t n = read_fs(entry, off, sizeof(buf), buf);
-            if (n == 0) {
+
+            if (n == 0U) {
                 break;
             }
 
-            for (uint32_t j = 0; j < n; ++j) {
+            for (uint32_t j = 0U; j < n; ++j) {
                 vga_putc((char)buf[j]);
             }
 
@@ -359,6 +385,7 @@ static void shell_cmd_cat(const char *name) {
 
 static void shell_write_text_file(const char *name, const char *text) {
     fs_node_t *entry;
+    uint32_t text_length;
     uint32_t n;
 
     if (name == 0 || *name == 0) {
@@ -366,14 +393,16 @@ static void shell_write_text_file(const char *name, const char *text) {
         return;
     }
 
-    entry = ramfs_touch(name);
+    entry = vfs_create(name, FS_FILE | FS_WRITABLE);
     if (entry == 0) {
         klog_warn("falha ao criar/abrir arquivo");
         return;
     }
 
-    n = write_fs(entry, 0, str_len(text), (const uint8_t *)text);
-    if (n != str_len(text)) {
+    text_length = str_len(text);
+    n = write_fs(entry, 0U, text_length, (const uint8_t *)text);
+
+    if (n != text_length) {
         klog_warn("arquivo somente leitura ou sem memoria");
         return;
     }
@@ -394,14 +423,33 @@ static void shell_cmd_touch(const char *name) {
         return;
     }
 
-    entry = ramfs_touch(name);
+    entry = vfs_create(name, FS_FILE | FS_WRITABLE);
     if (entry == 0) {
         klog_warn("touch falhou");
         return;
     }
 
     vga_puts("touch: ");
-    vga_puts(entry->name);
+    vga_puts(name);
+    vga_puts("\n");
+}
+
+static void shell_cmd_mkdir(const char *path) {
+    fs_node_t *entry;
+
+    if (path == 0 || *path == 0) {
+        klog_warn("usage: mkdir <diretorio>");
+        return;
+    }
+
+    entry = vfs_create(path, FS_DIRECTORY);
+    if (entry == 0 || (entry->flags & FS_DIRECTORY) == 0U) {
+        klog_warn("mkdir falhou");
+        return;
+    }
+
+    vga_puts("mkdir: ");
+    vga_puts(path);
     vga_puts("\n");
 }
 
@@ -732,7 +780,7 @@ static void shell_cmd_tmptest(void) {
 
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
@@ -838,7 +886,11 @@ static void shell_run_command(const char *cmd) {
     } else if (str_starts(cmd, "krealloc ")) {
         shell_cmd_krealloc_slot(skip_spaces(cmd + 9));
     } else if (str_eq(cmd, "ls")) {
-        shell_cmd_ls();
+        shell_cmd_ls("/");
+    } else if (str_starts(cmd, "ls ")) {
+        shell_cmd_ls(skip_spaces(cmd + 3));
+    } else if (str_starts(cmd, "mkdir ")) {
+        shell_cmd_mkdir(skip_spaces(cmd + 6));
     } else if (str_starts(cmd, "touch ")) {
         shell_cmd_touch(cmd + 6);
     } else if (str_starts(cmd, "cat > ")) {
