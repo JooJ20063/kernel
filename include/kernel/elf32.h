@@ -2,6 +2,11 @@
 
 #include <stdint.h>
 #include <kernel/vfs.h>
+#include <arch/x86/regs.h>
+
+#define ELF32_EXEC_MAX_ARGS   16U
+#define ELF32_EXEC_MAX_ENVS   16U
+#define ELF32_EXEC_MAX_STRING 128U
 
 #define ELF32_NIDENT 16U
 
@@ -123,7 +128,9 @@ typedef enum {
     ELF32_ERR_PAGE_FLAGS = -33,
     ELF32_ERR_STACK_CONFLICT = -34,
     ELF32_ERR_STACK_MAP = -35,
-    ELF32_ERR_TASK_CREATE = -36
+    ELF32_ERR_TASK_CREATE = -36,
+    ELF32_ERR_STACK_ARGS = -37,
+    ELF32_ERR_EXEC_REPLACE = -38
 } elf32_status_t;
 
 int elf32_validate_header(
@@ -165,6 +172,15 @@ void elf32_unload_image(elf32_loaded_image_t *loaded);
 int elf32_spawn(
     fs_node_t *node,
     uint32_t *pid_out
+);
+
+int elf32_exec_current(
+    fs_node_t *node,
+    const char *const argv[],
+    uint32_t argc,
+    const char *const envp[],
+    uint32_t envc,
+    registers_t *regs
 );
 
 const char *elf32_status_string(int status);

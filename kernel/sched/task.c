@@ -757,6 +757,72 @@ int sched_create_user_task_in_address_space(
     return (int)process->pid;
 }
 
+int sched_exec_current_address_space(
+    const char *name,
+    uintptr_t entry,
+    uintptr_t user_stack_top,
+    uint32_t cr3,
+    registers_t *regs
+) {
+    process_t *process;
+    uint32_t old_cr3;
+
+    if (current == 0 ||
+        current == &idle_task ||
+        current->process == 0 ||
+        regs == 0 ||
+        entry == 0U ||
+        user_stack_top == 0U ||
+        cr3 == 0U ||
+        cr3 == vmm_kernel_cr3()) {
+        return -1;
+    }
+
+    process = current->process;
+    old_cr3 = process->cr3;
+
+    if (old_cr3 == 0U ||
+        old_cr3 == vmm_kernel_cr3() ||
+        old_cr3 == cr3) {
+        return -2;
+    }
+
+    process->cr3 = cr3;
+    process->name = name;
+    process->exit_code = 0;
+    process->exited = 0U;
+
+    regs->gs = USER_DS;
+    regs->fs = USER_DS;
+    regs->es = USER_DS;
+    regs->ds = USER_DS;
+
+    regs->edi = 0U;
+    regs->esi = 0U;
+    regs->ebp = 0U;
+    regs->esp = 0U;
+    regs->ebx = 0U;
+    regs->edx = 0U;
+    regs->ecx = 0U;
+    regs->eax = 0U;
+
+    regs->int_no = 0U;
+    regs->err = 0U;
+    regs->eip = (uint32_t)entry;
+    regs->cs = USER_CS;
+    regs->eflags = EFLAGS_IF;
+    regs->useresp = (uint32_t)user_stack_top;
+    regs->ss = USER_DS;
+
+    current->context = regs;
+
+    fpu_reset_task(current);
+    vmm_switch_address_space(cr3);
+    vmm_destroy_address_space(old_cr3);
+
+    return 0;
+}
+
 int sched_create_user_task(
     const char *name,
     void (*entry)(void),

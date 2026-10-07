@@ -5,6 +5,8 @@
 #include <kernel/uaccess.h>
 #include <kernel/fd.h>
 #include <kernel/vfs.h>
+#include <kernel/kmalloc.h>
+#include <kernel/elf32.h>
 #include <czk/errno.h>
 #include <czk/fcntl.h>
 #include <czk/seek.h>
@@ -13,6 +15,87 @@
 
 static uint32_t syscall_error(uint32_t error_number) {
     return (uint32_t)(-(int32_t)error_number);
+}
+
+typedef struct execve_copy {
+    const char *argv[ELF32_EXEC_MAX_ARGS];
+    const char *envp[ELF32_EXEC_MAX_ENVS];
+    char argv_storage[ELF32_EXEC_MAX_ARGS][ELF32_EXEC_MAX_STRING];
+    char envp_storage[ELF32_EXEC_MAX_ENVS][ELF32_EXEC_MAX_STRING];
+    uint32_t argc;
+    uint32_t envc;
+} execve_copy_t;
+
+static int syscall_copy_string_vector(
+    uintptr_t user_vector,
+    char storage[][ELF32_EXEC_MAX_STRING],
+    const char **kernel_vector,
+    uint32_t max_count,
+    uint32_t *count_out
+) {
+    if (kernel_vector == 0 || count_out == 0) {
+        return -1;
+    }
+
+    *count_out = 0U;
+
+    if (user_vector == 0U) {
+        return 0;
+    }
+
+    for (uint32_t i = 0U; i < max_count; ++i) {
+        uint32_t user_string = 0U;
+        int copy_result;
+
+        if (copy_from_user(
+                &user_string,
+                (const void *)(
+                    user_vector +
+                    i * (uint32_t)sizeof(uint32_t)
+                ),
+                sizeof(user_string)) != 0) {
+            return -1;
+        }
+
+        if (user_string == 0U) {
+            *count_out = i;
+            return 0;
+        }
+
+        copy_result = copy_string_from_user(
+            storage[i],
+            (const char *)(uintptr_t)user_string,
+            ELF32_EXEC_MAX_STRING
+        );
+
+        if (copy_result == -1) {
+            return -1;
+        }
+
+        if (copy_result == -2) {
+            return -2;
+        }
+
+        kernel_vector[i] = storage[i];
+    }
+
+    return -3;
+}
+
+static uint32_t syscall_execve_error(int elf_status) {
+    switch (elf_status) {
+        case ELF32_ERR_NO_MEMORY:
+            return CZK_ENOMEM;
+
+        case ELF32_ERR_STACK_ARGS:
+            return CZK_E2BIG;
+
+        case ELF32_ERR_ARGUMENT:
+            return CZK_EINVAL;
+
+        default:
+            return CZK_ENOEXEC;
+    }
 }
 
 static void syscall_dirent_from_node(
@@ -407,6 +490,112 @@ registers_t *syscall_handler(registers_t *regs) {
 
             regs->eax = 0U;
             break;
+        }
+
+        case SYS_EXECVE: {
+            const char *user_path =
+                (const char *)(uintptr_t)regs->ebx;
+            uintptr_t user_argv = (uintptr_t)regs->ecx;
+            uintptr_t user_envp = (uintptr_t)regs->edx;
+            char path[128];
+            fs_node_t *node;
+            execve_copy_t *copy;
+            int copy_result;
+            int status;
+
+            copy_result = copy_string_from_user(
+                path,
+                user_path,
+                sizeof(path)
+            );
+
+            if (copy_result == -1) {
+                regs->eax = syscall_error(CZK_EFAULT);
+                break;
+            }
+
+            if (copy_result == -2) {
+                regs->eax = syscall_error(CZK_ENAMETOOLONG);
+                break;
+            }
+
+            if (path[0] == 0) {
+                regs->eax = syscall_error(CZK_EINVAL);
+                break;
+            }
+
+            node = vfs_resolve(path);
+
+            if (node == 0) {
+                regs->eax = syscall_error(CZK_ENOENT);
+                break;
+            }
+
+            if ((node->flags & FS_FILE) == 0U) {
+                regs->eax = syscall_error(CZK_EACCES);
+                break;
+            }
+
+            copy = (execve_copy_t *)kmalloc(sizeof(execve_copy_t));
+            if (copy == 0) {
+                regs->eax = syscall_error(CZK_ENOMEM);
+                break;
+            }
+
+            copy_result = syscall_copy_string_vector(
+                user_argv,
+                copy->argv_storage,
+                copy->argv,
+                ELF32_EXEC_MAX_ARGS,
+                &copy->argc
+            );
+
+            if (copy_result == 0) {
+                copy_result = syscall_copy_string_vector(
+                    user_envp,
+                    copy->envp_storage,
+                    copy->envp,
+                    ELF32_EXEC_MAX_ENVS,
+                    &copy->envc
+                );
+            }
+
+            if (copy_result != 0) {
+                kfree(copy);
+
+                if (copy_result == -1) {
+                    regs->eax = syscall_error(CZK_EFAULT);
+                } else if (copy_result == -2) {
+                    regs->eax = syscall_error(CZK_ENAMETOOLONG);
+                } else {
+                    regs->eax = syscall_error(CZK_E2BIG);
+                }
+
+                break;
+            }
+
+            status = elf32_exec_current(
+                node,
+                copy->argv,
+                copy->argc,
+                copy->envp,
+                copy->envc,
+                regs
+            );
+
+            kfree(copy);
+
+            if (status != ELF32_OK) {
+                regs->eax =
+                    syscall_error(syscall_execve_error(status));
+                break;
+            }
+
+            /*
+             * Success never returns to the old image: regs now describes
+             * the new ELF entry point and the scheduler has switched CR3.
+             */
+            return regs;
         }
 
         case SYS_READDIR: {

@@ -8,6 +8,8 @@
  * retain their syscall-specific success meaning.
  */
 #define CZK_ENOENT  2
+#define CZK_E2BIG   7
+#define CZK_ENOEXEC 8
 #define CZK_EBADF   9
 #define CZK_ENOMEM 12
 #define CZK_EACCES 13
