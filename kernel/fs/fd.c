@@ -67,7 +67,9 @@ int32_t fd_open_vfs(fd_table_t *table, fs_node_t *node, uint32_t access) {
         return -1;
     }
 
-    if ((access & FD_ACCESS_READ) != 0U && node->read == 0) {
+    if ((access & FD_ACCESS_READ) != 0U &&
+        node->read == 0 &&
+        node->readdir == 0) {
         return -2;
     }
 
@@ -259,4 +261,39 @@ int32_t fd_stat(
     *size_out = entry->node->size;
     *flags_out = entry->node->flags;
     return 0;
+}
+
+int32_t fd_readdir(
+    fd_table_t *table,
+    uint32_t fd,
+    fs_node_t **node_out
+) {
+    fd_entry_t *entry;
+    fs_node_t *node;
+
+    if (table == 0 ||
+        fd >= FD_TABLE_MAX ||
+        node_out == 0) {
+        return -1;
+    }
+
+    entry = &table->entries[fd];
+
+    if (entry->kind == FD_KIND_NONE || entry->node == 0) {
+        return -1;
+    }
+
+    if ((entry->node->flags & FS_DIRECTORY) == 0U ||
+        entry->node->readdir == 0) {
+        return -2;
+    }
+
+    node = readdir_fs(entry->node, entry->offset);
+    if (node == 0) {
+        return 0;
+    }
+
+    entry->offset++;
+    *node_out = node;
+    return 1;
 }
