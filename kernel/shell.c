@@ -10,6 +10,7 @@
 #include <kernel/ramfs.h>
 #include <kernel/task.h>
 #include <kernel/syscall.h>
+#include <kernel/serial.h>
 
 
 #ifdef __x86_64__
@@ -894,10 +895,17 @@ void shell_on_key(char c) {
         if (line_len > 0) {
             line_len--;
             uint16_t p = vga_get_cursor_pos();
+
             if (p > 0) {
+                vga_set_serial_mirror(0);
                 vga_set_cursor_pos(p - 1);
                 vga_putc(' ');
                 vga_set_cursor_pos(p - 1);
+                vga_set_serial_mirror(1);
+            }
+
+            if (serial_is_available()) {
+                serial_puts("\b \b");
             }
         }
         return;

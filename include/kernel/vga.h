@@ -12,3 +12,4 @@ void vga_puthex(uint32_t value);
 void vga_puthex64(uint64_t value);
 void vga_putdec(uint32_t value);
 void vga_write_at(uint16_t pos, const char *s);
+void vga_set_serial_mirror(int enabled);

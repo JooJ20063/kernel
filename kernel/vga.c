@@ -1,4 +1,5 @@
 #include <kernel/vga.h>
+#include <kernel/serial.h>
 
 #define VGA_MEM ((volatile uint8_t *)0xB8000)
 #define VGA_WIDTH 80
@@ -10,6 +11,7 @@
 
 static uint16_t cursor;
 static uint8_t color = 0x0F;
+static int serial_mirror = 1;
 
 static inline void outb(uint16_t port, uint8_t val) {
     asm volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
@@ -71,6 +73,10 @@ void vga_clear(void) {
 }
 
 void vga_putc(char c) {
+    if (serial_mirror) {
+        serial_putc(c);
+    }
+
     if (c == '\n') {
         cursor = (uint16_t)(((cursor / VGA_WIDTH) + 1) * VGA_WIDTH);
         vga_scroll_if_needed();
@@ -137,4 +143,9 @@ void vga_putdec(uint32_t value) {
 void vga_write_at(uint16_t pos, const char *s) {
     vga_set_cursor_pos(pos);
     vga_puts(s);
+}
+
+
+void vga_set_serial_mirror(int enabled) {
+    serial_mirror = enabled ? 1 : 0;
 }

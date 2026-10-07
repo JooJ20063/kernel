@@ -8,12 +8,12 @@
 
 .section .multiboot
 .align 8
+header_start:
 .long MAGIC
 .long ARCH
 .long HEADER_LEN
 .long CHECKSUM
 
-header_start:
     .short 0
     .short 0
     .long 8

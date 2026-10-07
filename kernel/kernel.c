@@ -15,6 +15,7 @@
 #include <arch/x86/fpu.h>
 #include <arch/x86/tss.h>
 #include <kernel/version.h>
+#include <kernel/serial.h>
 
 struct exception_info {
     const char *name;
@@ -218,6 +219,8 @@ registers_t *isr_handler_c(registers_t *r) {
 }
 
 void kernel_main(uint32_t mb_info_addr) {
+   serial_init();
+
    vga_set_color(0x0F, 0x00);
    vga_clear();
 
@@ -234,6 +237,10 @@ void kernel_main(uint32_t mb_info_addr) {
 
    pic_unmask_irq(0); /* timer */
    pic_unmask_irq(1); /* keyboard */
+   if (serial_is_available()) {
+       serial_enable_rx_interrupt();
+       pic_unmask_irq(4); /* COM1 */
+   }
 
    irq_init(100, 25);
 
