@@ -7,6 +7,8 @@
 #include <kernel/ramfs.h>
 #include <czk/errno.h>
 #include <czk/fcntl.h>
+#include <czk/seek.h>
+#include <czk/stat.h>
 
 static uint32_t syscall_error(uint32_t error_number) {
     return (uint32_t)(-(int32_t)error_number);
@@ -308,6 +310,72 @@ registers_t *syscall_handler(registers_t *regs) {
 
             if (task == 0 || fd_close(&task->fds, fd) != 0) {
                 regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            regs->eax = 0U;
+            break;
+        }
+
+        case SYS_LSEEK: {
+            uint32_t fd = regs->ebx;
+            int32_t offset = (int32_t)regs->ecx;
+            uint32_t whence = regs->edx;
+            uint32_t new_offset = 0U;
+            int32_t result;
+            task_t *task = sched_current_task_ptr();
+
+            if (task == 0) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            result = fd_seek(
+                &task->fds,
+                fd,
+                offset,
+                whence,
+                &new_offset
+            );
+
+            if (result == -1) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            if (result == -2) {
+                regs->eax = syscall_error(CZK_ESPIPE);
+                break;
+            }
+
+            if (result == -3) {
+                regs->eax = syscall_error(CZK_EINVAL);
+                break;
+            }
+
+            regs->eax = new_offset;
+            break;
+        }
+
+        case SYS_FSTAT: {
+            uint32_t fd = regs->ebx;
+            czk_stat_t *user_stat =
+                (czk_stat_t *)(uintptr_t)regs->ecx;
+            czk_stat_t stat;
+            task_t *task = sched_current_task_ptr();
+
+            if (task == 0 ||
+                fd_stat(
+                    &task->fds,
+                    fd,
+                    &stat.st_size,
+                    &stat.st_flags) != 0) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            if (copy_to_user(user_stat, &stat, sizeof(stat)) != 0) {
+                regs->eax = syscall_error(CZK_EFAULT);
                 break;
             }
 
