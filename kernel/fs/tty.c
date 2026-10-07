@@ -10,6 +10,27 @@ static volatile uint32_t tty1_tail;
 static volatile uint32_t tty1_count;
 static volatile uint32_t tty1_drop_count;
 
+static uint32_t tty_irq_save_disable(void) {
+    uint32_t flags;
+
+    asm volatile (
+        "pushf\n"
+        "pop %0\n"
+        "cli"
+        : "=r"(flags)
+        :
+        : "memory"
+    );
+
+    return flags;
+}
+
+static void tty_irq_restore(uint32_t flags) {
+    if ((flags & (1U << 9)) != 0U) {
+        asm volatile ("sti" : : : "memory");
+    }
+}
+
 static void tty1_noop(fs_node_t *node) {
     (void)node;
 }
@@ -36,6 +57,7 @@ static uint32_t tty1_read(
     uint8_t *buffer
 ) {
     uint32_t read_count = 0U;
+    uint32_t flags;
 
     (void)node;
     (void)offset;
@@ -44,12 +66,15 @@ static uint32_t tty1_read(
         return 0U;
     }
 
+    flags = tty_irq_save_disable();
+
     while (read_count < size && tty1_count > 0U) {
         buffer[read_count++] = tty1_input[tty1_tail];
         tty1_tail = (tty1_tail + 1U) % TTY1_INPUT_CAPACITY;
         tty1_count--;
     }
 
+    tty_irq_restore(flags);
     return read_count;
 }
 
@@ -108,13 +133,21 @@ void tty1_receive_char(char c) {
 }
 
 void tty1_flush_input(void) {
+    uint32_t flags = tty_irq_save_disable();
+
     tty1_head = 0U;
     tty1_tail = 0U;
     tty1_count = 0U;
+
+    tty_irq_restore(flags);
 }
 
 uint32_t tty1_pending(void) {
-    return tty1_count;
+    uint32_t flags = tty_irq_save_disable();
+    uint32_t count = tty1_count;
+
+    tty_irq_restore(flags);
+    return count;
 }
 
 uint32_t tty1_dropped(void) {
