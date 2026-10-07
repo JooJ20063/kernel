@@ -13,5 +13,6 @@
 #define SYS_CLOSE  10
 #define SYS_LSEEK  11
 #define SYS_FSTAT  12
+#define SYS_READDIR 13
 
 #endif
