@@ -19,6 +19,7 @@ C_SRCS := \
 	kernel/mm/pmm.c \
 	kernel/mm/kmalloc.c \
 	kernel/fs/vfs.c \
+	kernel/fs/fd.c \
 	kernel/fs/ramfs.c \
 	kernel/sched/task.c \
 	kernel/debug/shell.c \
