@@ -11,6 +11,7 @@ static volatile uint32_t tty1_tail;
 static volatile uint32_t tty1_count;
 static volatile uint32_t tty1_drop_count;
 static volatile tty_input_focus_t tty1_focus;
+static volatile uint32_t tty1_foreground;
 static wait_queue_t tty1_read_waiters;
 
 static uint32_t tty_irq_save_disable(void) {
@@ -54,8 +55,13 @@ static void str_copy_limit(char *dst, const char *src, uint32_t limit) {
 }
 
 static int tty1_input_ready(void *ctx) {
-    (void)ctx;
-    return tty1_count > 0U;
+    const uint32_t *pid = (const uint32_t *)ctx;
+
+    if (pid == 0) {
+        return 0;
+    }
+
+    return tty1_foreground == *pid && tty1_count > 0U;
 }
 
 static uint32_t tty1_read(
@@ -75,35 +81,48 @@ static uint32_t tty1_read(
         return 0U;
     }
 
-    for (;;) {
-        uint32_t read_count = 0U;
-        uint32_t flags = tty_irq_save_disable();
+    {
+        uint32_t caller_pid = sched_current_pid();
 
-        while (read_count < size && tty1_count > 0U) {
-            buffer[read_count++] = tty1_input[tty1_tail];
-            tty1_tail = (tty1_tail + 1U) % TTY1_INPUT_CAPACITY;
-            tty1_count--;
-        }
+        for (;;) {
+            uint32_t read_count = 0U;
+            uint32_t flags = tty_irq_save_disable();
 
-        tty_irq_restore(flags);
-
-        if (read_count > 0U) {
-            return read_count;
-        }
-
-        /*
-         * Recheck readiness atomically with queue insertion. This closes
-         * the classic empty-buffer -> sleep lost-wakeup race.
-         */
-        if (task_wait_until(
-                &tty1_read_waiters,
-                tty1_input_ready,
-                0) != 0) {
             /*
-             * The bootstrap/idle context cannot sleep. Preserve the old
-             * non-blocking behavior for that context only.
+             * Owning /dev/tty1 as an open file is not enough to consume
+             * input. Only the process currently in the TTY foreground may
+             * drain the input ring.
              */
-            return 0U;
+            if (tty1_foreground == caller_pid) {
+                while (read_count < size && tty1_count > 0U) {
+                    buffer[read_count++] = tty1_input[tty1_tail];
+                    tty1_tail =
+                        (tty1_tail + 1U) % TTY1_INPUT_CAPACITY;
+                    tty1_count--;
+                }
+            }
+
+            tty_irq_restore(flags);
+
+            if (read_count > 0U) {
+                return read_count;
+            }
+
+            /*
+             * Recheck foreground ownership and data availability atomically
+             * with queue insertion. This preserves the lost-wakeup guarantee
+             * while also keeping background readers asleep.
+             */
+            if (task_wait_until(
+                    &tty1_read_waiters,
+                    tty1_input_ready,
+                    &caller_pid) != 0) {
+                /*
+                 * The bootstrap/idle context cannot sleep. Preserve the old
+                 * non-blocking behavior for that context only.
+                 */
+                return 0U;
+            }
         }
     }
 }
@@ -150,6 +169,7 @@ void tty1_init(void) {
     tty1_count = 0U;
     tty1_drop_count = 0U;
     tty1_focus = TTY_INPUT_FOCUS_SHELL;
+    tty1_foreground = 0U;
     wait_queue_init(&tty1_read_waiters);
 }
 
@@ -167,10 +187,11 @@ void tty1_receive_char(char c) {
     tty1_count++;
 
     /*
-     * One input byte is enough to make one blocked reader runnable.
-     * wait_queue_wake_one() is IRQ-safe even when called from IRQ1/COM1.
+     * Foreground filtering means the first waiter is not necessarily the
+     * process allowed to consume input. Wake all readers so the foreground
+     * process can observe readiness while background readers re-sleep.
      */
-    (void)wait_queue_wake_one(&tty1_read_waiters);
+    wait_queue_wake_all(&tty1_read_waiters);
     tty_irq_restore(flags);
 }
 
@@ -190,7 +211,13 @@ void tty1_set_input_focus(tty_input_focus_t focus) {
     if (focus == TTY_INPUT_FOCUS_TTY1) {
         tty1_focus = TTY_INPUT_FOCUS_TTY1;
     } else {
+        /*
+         * Returning input to the Ring 0 shell is an explicit ownership
+         * override. No userspace process remains the TTY foreground owner.
+         */
         tty1_focus = TTY_INPUT_FOCUS_SHELL;
+        tty1_foreground = 0U;
+        wait_queue_wake_all(&tty1_read_waiters);
     }
 
     tty_irq_restore(flags);
@@ -198,6 +225,52 @@ void tty1_set_input_focus(tty_input_focus_t focus) {
 
 tty_input_focus_t tty1_input_focus(void) {
     return tty1_focus;
+}
+
+void tty1_set_foreground_pid(uint32_t pid) {
+    uint32_t flags = tty_irq_save_disable();
+
+    tty1_foreground = pid;
+
+    if (pid != 0U) {
+        tty1_focus = TTY_INPUT_FOCUS_TTY1;
+    }
+
+    /*
+     * A process blocked because it was in the background may now be the
+     * foreground owner. Let all readers re-evaluate their wait condition.
+     */
+    wait_queue_wake_all(&tty1_read_waiters);
+    tty_irq_restore(flags);
+}
+
+uint32_t tty1_foreground_pid(void) {
+    uint32_t flags = tty_irq_save_disable();
+    uint32_t pid = tty1_foreground;
+
+    tty_irq_restore(flags);
+    return pid;
+}
+
+int tty1_release_foreground(uint32_t pid) {
+    uint32_t flags;
+    int released = 0;
+
+    if (pid == 0U) {
+        return 0;
+    }
+
+    flags = tty_irq_save_disable();
+
+    if (tty1_foreground == pid) {
+        tty1_foreground = 0U;
+        tty1_focus = TTY_INPUT_FOCUS_SHELL;
+        wait_queue_wake_all(&tty1_read_waiters);
+        released = 1;
+    }
+
+    tty_irq_restore(flags);
+    return released;
 }
 
 uint32_t tty1_pending(void) {
