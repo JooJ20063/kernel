@@ -38,6 +38,7 @@
 #define CZK_ABI_STACK_ALIGNMENT 16U
 
 #define CZK_PATH_MAX        128U
+#define CZK_OPEN_MAX          16U
 #define CZK_NAME_MAX        128U
 #define CZK_EXEC_MAX_ARGS    16U
 #define CZK_EXEC_MAX_ENVS    16U
