@@ -4,6 +4,7 @@
 
 #define UACCESS_PAGE_SIZE 0x1000U
 #define UACCESS_PAGE_MASK (~(uintptr_t)(UACCESS_PAGE_SIZE - 1U))
+#define UACCESS_PTR_MAX   (~(uintptr_t)0)
 
 static int page_allows_user(uintptr_t addr, int write_access) {
     uint32_t flags;
@@ -39,7 +40,7 @@ int user_ptr_valid(const void *user_ptr, size_t len, int write_access) {
 
     start = (uintptr_t)user_ptr;
 
-    if ((uintptr_t)(len - 1U) > UINTPTR_MAX - start) {
+    if ((uintptr_t)(len - 1U) > UACCESS_PTR_MAX - start) {
         return 0;
     }
 
@@ -56,7 +57,7 @@ int user_ptr_valid(const void *user_ptr, size_t len, int write_access) {
             break;
         }
 
-        if (page > UINTPTR_MAX - UACCESS_PAGE_SIZE) {
+        if (page > UACCESS_PTR_MAX - UACCESS_PAGE_SIZE) {
             return 0;
         }
 
