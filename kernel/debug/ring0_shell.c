@@ -31,6 +31,7 @@ extern void user_gp_test_entry(void);
 extern void user_aspace_test_entry(void);
 extern void user_tty_block_test_entry(void);
 extern void user_tty_foreground_test_entry(void);
+extern void user_tty_canonical_test_entry(void);
 extern uint8_t user_stack_top;
 extern void enter_ring3(uint32_t entry, uint32_t user_stack);
 #endif
@@ -930,6 +931,8 @@ static void shell_cmd_ttytest(void) {
         return;
     }
 
+    tty1_set_mode(TTY_MODE_RAW);
+    tty1_set_echo(0);
     tty1_flush_input();
 
     for (uint32_t i = 0U; i < sizeof(sample); ++i) {
@@ -1010,6 +1013,8 @@ static void shell_cmd_stdiotest(void) {
     }
 
     if (ok) {
+        tty1_set_mode(TTY_MODE_RAW);
+        tty1_set_echo(0);
         tty1_flush_input();
         tty1_receive_char((char)stdin_sample[0]);
         tty1_receive_char((char)stdin_sample[1]);
@@ -1064,6 +1069,14 @@ static void shell_cmd_ttyfocus(const char *arg) {
         );
         vga_puts(" fgpid=");
         vga_putdec(tty1_foreground_pid());
+        vga_puts(" mode=");
+        vga_puts(
+            tty1_mode() == TTY_MODE_CANONICAL
+                ? "canonical"
+                : "raw"
+        );
+        vga_puts(" echo=");
+        vga_puts(tty1_echo_enabled() ? "on" : "off");
         vga_puts(" pending=");
         vga_putdec(tty1_pending());
         vga_puts("\n");
@@ -1103,7 +1116,7 @@ static void ttyblock_waker_task(void) {
 
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest stdiotest ttyblocktest ttyfgtest ttyfocus wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest stdiotest ttyblocktest ttyfgtest ttycantest ttyfocus wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
@@ -1332,6 +1345,8 @@ static void shell_run_command(const char *cmd) {
         int reader_pid;
         int waker_pid;
 
+        tty1_set_mode(TTY_MODE_RAW);
+        tty1_set_echo(0);
         tty1_flush_input();
 
         reader_pid = sched_create_user_task(
@@ -1368,6 +1383,8 @@ static void shell_run_command(const char *cmd) {
     } else if (str_eq(cmd, "ttyfgtest")) {
         int reader_pid;
 
+        tty1_set_mode(TTY_MODE_RAW);
+        tty1_set_echo(0);
         tty1_flush_input();
 
         reader_pid = sched_create_user_task(
@@ -1384,6 +1401,30 @@ static void shell_run_command(const char *cmd) {
         vga_puts("ttyfgtest: foreground pid=");
         vga_putdec((uint32_t)reader_pid);
         vga_puts(" - type any key (F12 aborts foreground ownership)\n");
+
+        tty1_set_foreground_pid((uint32_t)reader_pid);
+    } else if (str_eq(cmd, "ttycantest")) {
+        int reader_pid;
+
+        tty1_set_mode(TTY_MODE_CANONICAL);
+        tty1_set_echo(1);
+        tty1_flush_input();
+
+        reader_pid = sched_create_user_task(
+            "tty-canonical-reader",
+            user_tty_canonical_test_entry,
+            (uintptr_t)&user_stack_top
+        );
+
+        if (reader_pid < 0) {
+            tty1_set_mode(TTY_MODE_RAW);
+            tty1_set_echo(0);
+            klog_warn("failed to create tty canonical reader");
+            return;
+        }
+
+        vga_puts("ttycantest: type helxo, Backspace twice, then lo and Enter\n");
+        vga_puts("ttycantest: expected final line is hello\\n\n");
 
         tty1_set_foreground_pid((uint32_t)reader_pid);
     } else if (str_eq(cmd, "ring3fault")) {
