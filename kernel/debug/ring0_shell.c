@@ -12,6 +12,7 @@
 #include <kernel/serial.h>
 #include <kernel/tty.h>
 #include <kernel/fd.h>
+#include <kernel/elf32.h>
 
 
 #ifdef __x86_64__
@@ -350,6 +351,82 @@ static void shell_cmd_ls(const char *path) {
 
     if (i == 0U) {
         vga_puts("(vazio)\n");
+    }
+}
+
+static void shell_cmd_elftest(const char *path) {
+    const char *target =
+        (path == 0 || *path == 0) ? "/bin/hello" : path;
+    fs_node_t *node = vfs_resolve(target);
+    elf32_ehdr_t header;
+    elf32_image_info_t image;
+    int status;
+
+    if (node == 0) {
+        klog_warn("elftest: file not found");
+        return;
+    }
+
+    status = elf32_inspect(node, &header, &image);
+    if (status != ELF32_OK) {
+        vga_puts("elftest: FAILED status=");
+        vga_putdec((uint32_t)(-status));
+        vga_puts(" reason=");
+        vga_puts(elf32_status_string(status));
+        vga_puts("\n");
+        return;
+    }
+
+    vga_puts("elftest: ");
+    vga_puts(target);
+    vga_puts(" ELF32/i386 OK\n");
+    vga_puts(" entry=");
+    vga_puthex(image.entry);
+    vga_puts(" load_segments=");
+    vga_putdec(image.load_segment_count);
+    vga_puts(" range=");
+    vga_puthex(image.lowest_vaddr);
+    vga_puts("..");
+    vga_puthex(image.highest_vaddr);
+    vga_puts("\n");
+
+    for (uint32_t i = 0U;
+         i < (uint32_t)header.e_phnum;
+         ++i) {
+        elf32_phdr_t ph;
+
+        status = elf32_read_program_header(
+            node,
+            &header,
+            i,
+            &ph
+        );
+        if (status != ELF32_OK) {
+            vga_puts(" phdr read failed at index=");
+            vga_putdec(i);
+            vga_puts("\n");
+            return;
+        }
+
+        if (ph.p_type != ELF32_PT_LOAD) {
+            continue;
+        }
+
+        vga_puts(" PT_LOAD[");
+        vga_putdec(i);
+        vga_puts("] off=");
+        vga_puthex(ph.p_offset);
+        vga_puts(" vaddr=");
+        vga_puthex(ph.p_vaddr);
+        vga_puts(" filesz=");
+        vga_puthex(ph.p_filesz);
+        vga_puts(" memsz=");
+        vga_puthex(ph.p_memsz);
+        vga_puts(" flags=");
+        vga_puthex(ph.p_flags);
+        vga_puts(" align=");
+        vga_puthex(ph.p_align);
+        vga_puts("\n");
     }
 }
 
@@ -1116,11 +1193,12 @@ static void ttyblock_waker_task(void) {
 
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest stdiotest ttyblocktest ttyfgtest ttycantest ttyfocus wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest stdiotest ttyblocktest ttyfgtest ttycantest ttyfocus wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo elftest panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
         vga_puts("heap dbg: kmalloc <bytes> | kfree <slot> | krealloc <slot> <bytes> | kslots | kheapcheck\n");
+        vga_puts("elf: elftest [path] (default /bin/hello)\n");
     } else if (str_eq(cmd, "arch")) {
         if (sizeof(void*) == 8) {
             vga_puts("architecture: x86_64\n");
@@ -1241,6 +1319,10 @@ static void shell_run_command(const char *cmd) {
         shell_cmd_mkdir(skip_spaces(cmd + 6));
     } else if (str_starts(cmd, "touch ")) {
         shell_cmd_touch(cmd + 6);
+    } else if (str_eq(cmd, "elftest")) {
+        shell_cmd_elftest(0);
+    } else if (str_starts(cmd, "elftest ")) {
+        shell_cmd_elftest(skip_spaces(cmd + 8));
     } else if (str_starts(cmd, "cat > ")) {
         uint32_t i = 6;
         uint32_t file_start = i;
