@@ -4,6 +4,15 @@
 .extern main
 
 _start:
+    # ABI v1 guarantees a 16-byte aligned process-entry stack.
+    test $0xF, %esp
+    jz 1f
+
+    mov $127, %ebx
+    mov $2, %eax
+    int $0x80
+
+1:
     # Initial userspace stack:
     #   argc
     #   argv[0..argc-1]
@@ -26,9 +35,9 @@ _start:
     mov $2, %eax
     int $0x80
 
-1:
+2:
     pause
-    jmp 1b
+    jmp 2b
 
 .size _start, .-_start
 .section .note.GNU-stack,"",@progbits

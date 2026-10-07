@@ -4,8 +4,8 @@
 #include <kernel/task.h>
 
 #define ELF32_ADDR_MAX 0xFFFFFFFFU
-#define ELF32_USER_STACK_PAGES 4U
-#define ELF32_USER_STACK_TOP VMM_USER_MAX_ADDR
+#define ELF32_USER_STACK_PAGES CZK_ABI_STACK_INITIAL_PAGES
+#define ELF32_USER_STACK_TOP   CZK_ABI_STACK_TOP
 
 _Static_assert(sizeof(elf32_ehdr_t) == 52U, "ELF32 header size mismatch");
 _Static_assert(sizeof(elf32_phdr_t) == 32U, "ELF32 program header size mismatch");
@@ -50,6 +50,20 @@ static int elf32_validate_load_segment(
 
     if (program_header->p_filesz > program_header->p_memsz) {
         return ELF32_ERR_SEGMENT_SIZE;
+    }
+
+    /*
+     * A zero-sized PT_LOAD has no file bytes and reserves no virtual
+     * memory. GNU ld may emit one for an explicitly declared PHDR whose
+     * output section is empty. Treat it as inert before applying offset,
+     * address and alignment constraints that only matter for loadable
+     * contents.
+     */
+    if (program_header->p_memsz == 0U) {
+        if (segment_end_out != 0) {
+            *segment_end_out = program_header->p_vaddr;
+        }
+        return ELF32_OK;
     }
 
     if (program_header->p_offset > file_size ||
@@ -118,8 +132,8 @@ static int elf32_validate_user_load_range(
     segment_end =
         program_header->p_vaddr + program_header->p_memsz;
 
-    if (program_header->p_vaddr < VMM_USER_MIN_ADDR ||
-        segment_end > VMM_USER_MAX_ADDR) {
+    if (program_header->p_vaddr < CZK_ABI_USER_VA_MIN ||
+        segment_end > CZK_ABI_STACK_BOTTOM) {
         return ELF32_ERR_SEGMENT_USER_RANGE;
     }
 
@@ -131,8 +145,8 @@ static int elf32_validate_user_load_range(
         (segment_end + VMM_PAGE_SIZE - 1U) &
         ~(uint32_t)(VMM_PAGE_SIZE - 1U);
 
-    if (page_start < VMM_USER_MIN_ADDR ||
-        page_end > VMM_USER_MAX_ADDR ||
+    if (page_start < CZK_ABI_USER_VA_MIN ||
+        page_end > CZK_ABI_STACK_BOTTOM ||
         page_start >= page_end) {
         return ELF32_ERR_SEGMENT_USER_RANGE;
     }
@@ -804,7 +818,7 @@ static int elf32_string_size(
     }
 
     for (uint32_t i = 0U;
-         i < ELF32_EXEC_MAX_STRING;
+         i < CZK_EXEC_MAX_STRING;
          ++i) {
         if (value[i] == 0) {
             *size_out = i + 1U;
@@ -902,13 +916,13 @@ static int elf32_build_initial_stack(
     uintptr_t stack_top = 0U;
     uintptr_t stack_bottom;
     uintptr_t sp;
-    uint32_t argv_addrs[ELF32_EXEC_MAX_ARGS];
-    uint32_t envp_addrs[ELF32_EXEC_MAX_ENVS];
+    uint32_t argv_addrs[CZK_EXEC_MAX_ARGS];
+    uint32_t envp_addrs[CZK_EXEC_MAX_ENVS];
     int status;
 
     if (stack_pointer_out == 0 ||
-        argc > ELF32_EXEC_MAX_ARGS ||
-        envc > ELF32_EXEC_MAX_ENVS ||
+        argc > CZK_EXEC_MAX_ARGS ||
+        envc > CZK_EXEC_MAX_ENVS ||
         (argc != 0U && argv == 0) ||
         (envc != 0U && envp == 0)) {
         return ELF32_ERR_STACK_ARGS;
@@ -980,7 +994,26 @@ static int elf32_build_initial_stack(
         argv_addrs[index] = (uint32_t)sp;
     }
 
+    /*
+     * ABI v1 requires the entry stack pointer to be 16-byte aligned.
+     * Padding lives between the pointer vectors and copied strings, so
+     * argc remains exactly at [ESP].
+     */
     sp &= ~(uintptr_t)0x3U;
+
+    {
+        uint32_t vector_bytes =
+            (argc + envc + 3U) * (uint32_t)sizeof(uint32_t);
+        uintptr_t required_mod =
+            (uintptr_t)(vector_bytes & (CZK_ABI_STACK_ALIGNMENT - 1U));
+
+        while ((sp & (CZK_ABI_STACK_ALIGNMENT - 1U)) != required_mod) {
+            if (sp < stack_bottom + sizeof(uint32_t)) {
+                return ELF32_ERR_STACK_ARGS;
+            }
+            sp -= sizeof(uint32_t);
+        }
+    }
 
     status = elf32_push_u32(cr3, stack_bottom, &sp, 0U);
     if (status != ELF32_OK) {

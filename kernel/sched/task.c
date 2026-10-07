@@ -34,6 +34,7 @@ static task_t idle_task;
 static process_t idle_process;
 static task_t *current = 0;
 static task_t *task_list = 0;
+static wait_queue_t child_exit_waiters;
 
 static volatile uint32_t demo_counter_a = 0;
 static volatile uint32_t demo_counter_b = 0;
@@ -201,6 +202,7 @@ void sched_init(uint32_t quantum_ticks) {
     idle_task.fpu_initialized = 0;
 
     add_task(&idle_task);
+    wait_queue_init(&child_exit_waiters);
 
     current = &idle_task;
 }
@@ -409,6 +411,36 @@ void task_wake(task_t *task) {
     task->state = TASK_READY;
 }
 
+static int task_child_wait_ready(void *ctx) {
+    const uint32_t *parent_pid = (const uint32_t *)ctx;
+    uint8_t has_child = 0U;
+
+    if (parent_pid == 0 || task_list == 0) {
+        return 1;
+    }
+
+    task_t *t = task_list;
+
+    do {
+        if (t != &idle_task &&
+            t->process != 0 &&
+            t->process->parent_pid == *parent_pid) {
+            has_child = 1U;
+
+            if (t->state == TASK_ZOMBIE) {
+                return 1;
+            }
+        }
+
+        t = t->next;
+    } while (t != task_list);
+
+    /*
+     * Wake immediately when no children exist so wait() can return ECHILD.
+     */
+    return has_child == 0U;
+}
+
 static task_t *find_task_by_pid(uint32_t pid) {
     if (task_list == 0) {
         return 0;
@@ -480,6 +512,43 @@ int32_t task_wait_child(int32_t *status) {
     } while (t != task_list);
 
     return -1;
+}
+
+int32_t task_wait_child_blocking(int32_t *status) {
+    uint32_t parent_pid;
+
+    if (current == 0 ||
+        current == &idle_task ||
+        current->process == 0) {
+        return -1;
+    }
+
+    parent_pid = current->process->pid;
+
+    for (;;) {
+        int32_t pid = task_wait_child(status);
+
+        if (pid >= 0) {
+            return pid;
+        }
+
+        /*
+         * The condition is true for either a zombie child or no children.
+         * task_wait_until() evaluates it atomically with queue insertion,
+         * avoiding a lost wakeup if a child exits between the reap attempt
+         * above and the block below.
+         */
+        if (task_child_wait_ready(&parent_pid)) {
+            return -1;
+        }
+
+        if (task_wait_until(
+                &child_exit_waiters,
+                task_child_wait_ready,
+                &parent_pid) != 0) {
+            return -1;
+        }
+    }
 }
 
 static void reap_zombies(void) {
@@ -1104,6 +1173,7 @@ void task_exit_code(int32_t code) {
         current->block_reason = TASK_BLOCK_NONE;
         current->wake_tick = 0;
         current->state = TASK_ZOMBIE;
+        wait_queue_wake_all(&child_exit_waiters);
     }
 
     for (;;) {
@@ -1126,6 +1196,7 @@ registers_t *task_exit_from_exception(registers_t *regs, int32_t exit_code) {
     current->block_reason = TASK_BLOCK_NONE;
     current->wake_tick = 0;
     current->state = TASK_ZOMBIE;
+    wait_queue_wake_all(&child_exit_waiters);
 
     return sched_yield_irq(regs);
 }

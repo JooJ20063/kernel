@@ -59,6 +59,7 @@ uint32_t sched_last_exit_pid(void);
 uint32_t sched_current_ppid(void);
 int32_t sched_last_exit_code(void);
 int32_t task_wait_child(int32_t *status);
+int32_t task_wait_child_blocking(int32_t *status);
 
 int sched_create_kernel_task(const char *name, void (*entry)(void));
 int sched_create_user_task(const char *name, void (*entry)(void), uintptr_t user_stack_top);
