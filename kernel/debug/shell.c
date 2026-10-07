@@ -10,6 +10,7 @@
 #include <kernel/task.h>
 #include <kernel/syscall.h>
 #include <kernel/serial.h>
+#include <kernel/tty.h>
 
 
 #ifdef __x86_64__
@@ -908,9 +909,69 @@ static void shell_cmd_devtest(void) {
     vga_puts("\n");
 }
 
+static void shell_cmd_ttytest(void) {
+    fs_node_t *tty = vfs_resolve("/dev/tty1");
+    static const uint8_t sample[] = {'t', 't', 'y', '1', '\n'};
+    static const uint8_t output[] = "[tty1] output path OK\n";
+    uint8_t readback[sizeof(sample)];
+    uint8_t ok = 1U;
+
+    if (tty == 0) {
+        klog_warn("ttytest: /dev/tty1 unavailable");
+        return;
+    }
+
+    tty1_flush_input();
+
+    for (uint32_t i = 0U; i < sizeof(sample); ++i) {
+        tty1_receive_char((char)sample[i]);
+    }
+
+    if (tty1_pending() != sizeof(sample)) {
+        ok = 0U;
+    }
+
+    if (ok &&
+        read_fs(
+            tty,
+            0U,
+            sizeof(readback),
+            readback) != sizeof(readback)) {
+        ok = 0U;
+    }
+
+    if (ok) {
+        for (uint32_t i = 0U; i < sizeof(sample); ++i) {
+            if (readback[i] != sample[i]) {
+                ok = 0U;
+                break;
+            }
+        }
+    }
+
+    if (tty1_pending() != 0U) {
+        ok = 0U;
+    }
+
+    if (write_fs(
+            tty,
+            0U,
+            (uint32_t)sizeof(output) - 1U,
+            output) !=
+        (uint32_t)sizeof(output) - 1U) {
+        ok = 0U;
+    }
+
+    vga_puts("ttytest: result=");
+    vga_puts(ok ? "TTY1 OK" : "FAILED");
+    vga_puts(" dropped=");
+    vga_putdec(tty1_dropped());
+    vga_puts("\n");
+}
+
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
@@ -995,6 +1056,8 @@ static void shell_run_command(const char *cmd) {
         shell_cmd_mounttest();
     } else if (str_eq(cmd, "devtest")) {
         shell_cmd_devtest();
+    } else if (str_eq(cmd, "ttytest")) {
+        shell_cmd_ttytest();
     } else if (str_eq(cmd, "wp")) {
         vga_puts("CR0.WP=");
         vga_puts(vmm_wp_is_enabled() ? "ON" : "OFF");
