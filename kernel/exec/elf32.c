@@ -1,8 +1,11 @@
 #include <kernel/elf32.h>
 #include <kernel/pmm.h>
 #include <kernel/vmm.h>
+#include <kernel/task.h>
 
 #define ELF32_ADDR_MAX 0xFFFFFFFFU
+#define ELF32_USER_STACK_PAGES 4U
+#define ELF32_USER_STACK_TOP VMM_USER_MAX_ADDR
 
 _Static_assert(sizeof(elf32_ehdr_t) == 52U, "ELF32 header size mismatch");
 _Static_assert(sizeof(elf32_phdr_t) == 32U, "ELF32 program header size mismatch");
@@ -753,6 +756,104 @@ fail:
     return status;
 }
 
+static int elf32_map_user_stack(
+    uint32_t cr3,
+    uintptr_t *stack_top_out
+) {
+    uintptr_t stack_top = ELF32_USER_STACK_TOP;
+    uintptr_t stack_bottom =
+        stack_top -
+        (ELF32_USER_STACK_PAGES * VMM_PAGE_SIZE);
+
+    if (stack_bottom < VMM_USER_MIN_ADDR ||
+        stack_top > VMM_USER_MAX_ADDR) {
+        return ELF32_ERR_STACK_MAP;
+    }
+
+    for (uintptr_t addr = stack_bottom;
+         addr < stack_top;
+         addr += VMM_PAGE_SIZE) {
+        uint32_t frame;
+
+        if (vmm_translate_address_space(cr3, addr) != 0U) {
+            return ELF32_ERR_STACK_CONFLICT;
+        }
+
+        frame = pmm_alloc_frame();
+        if (frame == 0U) {
+            return ELF32_ERR_NO_MEMORY;
+        }
+
+        if (vmm_zero_phys(frame, VMM_PAGE_SIZE) != 0) {
+            pmm_free_frame(frame);
+            return ELF32_ERR_SEGMENT_ZERO;
+        }
+
+        if (vmm_map_user_page(
+                cr3,
+                addr,
+                frame,
+                VMM_PAGE_RW) != 0) {
+            pmm_free_frame(frame);
+            return ELF32_ERR_STACK_MAP;
+        }
+    }
+
+    if (stack_top_out != 0) {
+        *stack_top_out = stack_top;
+    }
+
+    return ELF32_OK;
+}
+
+int elf32_spawn(
+    fs_node_t *node,
+    uint32_t *pid_out
+) {
+    elf32_loaded_image_t loaded = {0};
+    uintptr_t user_stack_top = 0U;
+    int status;
+    int pid;
+
+    if (node == 0 || pid_out == 0) {
+        return ELF32_ERR_ARGUMENT;
+    }
+
+    status = elf32_load_image(node, &loaded);
+    if (status != ELF32_OK) {
+        return status;
+    }
+
+    status = elf32_map_user_stack(
+        loaded.cr3,
+        &user_stack_top
+    );
+    if (status != ELF32_OK) {
+        elf32_unload_image(&loaded);
+        return status;
+    }
+
+    pid = sched_create_user_task_in_address_space(
+        node->name,
+        (uintptr_t)loaded.entry,
+        user_stack_top,
+        loaded.cr3
+    );
+
+    if (pid < 0) {
+        elf32_unload_image(&loaded);
+        return ELF32_ERR_TASK_CREATE;
+    }
+
+    /*
+     * Ownership of the address space now belongs to process_t and will be
+     * released by process_destroy() after the task becomes reapable.
+     */
+    loaded.cr3 = 0U;
+    *pid_out = (uint32_t)pid;
+    return ELF32_OK;
+}
+
 void elf32_unload_image(elf32_loaded_image_t *loaded) {
     if (loaded == 0) {
         return;
@@ -840,6 +941,12 @@ const char *elf32_status_string(int status) {
             return "failed to zero ELF memory";
         case ELF32_ERR_PAGE_FLAGS:
             return "failed to inspect or update ELF page flags";
+        case ELF32_ERR_STACK_CONFLICT:
+            return "userspace stack conflicts with existing mapping";
+        case ELF32_ERR_STACK_MAP:
+            return "failed to map userspace stack";
+        case ELF32_ERR_TASK_CREATE:
+            return "failed to create ELF userspace task";
         default:
             return "unknown ELF error";
     }

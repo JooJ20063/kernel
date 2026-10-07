@@ -682,20 +682,23 @@ int sched_create_kernel_task(const char *name, void (*entry)(void)) {
     return (int)process->pid;
 }
 
-int sched_create_user_task(
+int sched_create_user_task_in_address_space(
     const char *name,
-    void (*entry)(void),
-    uintptr_t user_stack_top
+    uintptr_t entry,
+    uintptr_t user_stack_top,
+    uint32_t cr3
 ) {
     task_t *task;
     uint8_t *stack;
     registers_t *frame;
     process_t *process;
     uint32_t parent_pid;
-    uint32_t cr3;
     uintptr_t top;
 
-    if (entry == 0 || user_stack_top == 0U) {
+    if (entry == 0U ||
+        user_stack_top == 0U ||
+        cr3 == 0U ||
+        cr3 == vmm_kernel_cr3()) {
         return -1;
     }
 
@@ -715,35 +718,11 @@ int sched_create_user_task(
             ? current->process->pid
             : 0U;
 
-    cr3 = vmm_create_address_space();
-    if (cr3 == 0U) {
+    process = process_create(name, parent_pid, cr3);
+    if (process == 0) {
         kfree(stack);
         kfree(task);
         return -4;
-    }
-
-    if (vmm_clone_user_range(
-            cr3,
-            (uintptr_t)&_user_text_start,
-            (uintptr_t)&_user_text_end,
-            VMM_PAGE_USER) != 0 ||
-        vmm_clone_user_range(
-            cr3,
-            (uintptr_t)&_user_data_start,
-            (uintptr_t)&_user_data_end,
-            VMM_PAGE_USER | VMM_PAGE_RW) != 0) {
-        vmm_destroy_address_space(cr3);
-        kfree(stack);
-        kfree(task);
-        return -5;
-    }
-
-    process = process_create(name, parent_pid, cr3);
-    if (process == 0) {
-        vmm_destroy_address_space(cr3);
-        kfree(stack);
-        kfree(task);
-        return -6;
     }
 
     mem_zero(task, sizeof(task_t));
@@ -759,7 +738,7 @@ int sched_create_user_task(
     frame->fs = USER_DS;
     frame->es = USER_DS;
     frame->ds = USER_DS;
-    frame->eip = (uint32_t)(uintptr_t)entry;
+    frame->eip = (uint32_t)entry;
     frame->cs = USER_CS;
     frame->eflags = EFLAGS_IF;
     frame->useresp = (uint32_t)user_stack_top;
@@ -776,6 +755,52 @@ int sched_create_user_task(
     fpu_init_task(task);
 
     return (int)process->pid;
+}
+
+int sched_create_user_task(
+    const char *name,
+    void (*entry)(void),
+    uintptr_t user_stack_top
+) {
+    uint32_t cr3;
+    int pid;
+
+    if (entry == 0 || user_stack_top == 0U) {
+        return -1;
+    }
+
+    cr3 = vmm_create_address_space();
+    if (cr3 == 0U) {
+        return -4;
+    }
+
+    if (vmm_clone_user_range(
+            cr3,
+            (uintptr_t)&_user_text_start,
+            (uintptr_t)&_user_text_end,
+            VMM_PAGE_USER) != 0 ||
+        vmm_clone_user_range(
+            cr3,
+            (uintptr_t)&_user_data_start,
+            (uintptr_t)&_user_data_end,
+            VMM_PAGE_USER | VMM_PAGE_RW) != 0) {
+        vmm_destroy_address_space(cr3);
+        return -5;
+    }
+
+    pid = sched_create_user_task_in_address_space(
+        name,
+        (uintptr_t)entry,
+        user_stack_top,
+        cr3
+    );
+
+    if (pid < 0) {
+        vmm_destroy_address_space(cr3);
+        return -6;
+    }
+
+    return pid;
 }
 
 static void demo_task_a(void) {

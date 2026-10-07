@@ -63,6 +63,17 @@ int32_t task_wait_child(int32_t *status);
 int sched_create_kernel_task(const char *name, void (*entry)(void));
 int sched_create_user_task(const char *name, void (*entry)(void), uintptr_t user_stack_top);
 
+/*
+ * Creates a Ring 3 task in an already prepared private address space.
+ * Ownership of cr3 transfers to the new process only on success.
+ */
+int sched_create_user_task_in_address_space(
+    const char *name,
+    uintptr_t entry,
+    uintptr_t user_stack_top,
+    uint32_t cr3
+);
+
 void sched_demo_init(void);
 
 uint32_t sched_demo_counter_a(void);
