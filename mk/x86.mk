@@ -10,7 +10,7 @@ LDFLAGS ?= -m elf_i386 -T arch/x86/linker.ld
 DEPFLAGS := -MMD -MP
 
 USER_ELF_DIR := $(BUILD_DIR)/userspace
-USER_PROGRAM_NAMES := hello execprobe
+USER_PROGRAM_NAMES := hello execprobe abiprobe
 USER_PROGRAM_OBJS := $(addprefix $(USER_ELF_DIR)/,$(addsuffix .o,$(USER_PROGRAM_NAMES)))
 USER_PROGRAMS := $(addprefix $(USER_ELF_DIR)/,$(USER_PROGRAM_NAMES))
 USER_CRT0_OBJ := $(USER_ELF_DIR)/crt0.o
@@ -40,6 +40,7 @@ C_SRCS := \
 	kernel/debug/ring0_shell.c \
 	kernel/syscall/syscall.c \
 	kernel/uaccess/uaccess.c \
+	kernel/abi/contract.c \
 	arch/x86/cpu/idt.c \
 	arch/x86/cpu/irq.c \
 	arch/x86/cpu/pic.c \
