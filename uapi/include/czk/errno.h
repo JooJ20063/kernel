@@ -14,6 +14,7 @@
 #define CZK_ECHILD 10
 #define CZK_EFAULT 14
 #define CZK_EINVAL 22
+#define CZK_ESPIPE 29
 #define CZK_EMFILE 24
 #define CZK_ENAMETOOLONG 36
 #define CZK_ENOSYS 38
