@@ -120,7 +120,10 @@ typedef enum {
     ELF32_ERR_SEGMENT_READ = -30,
     ELF32_ERR_SEGMENT_COPY = -31,
     ELF32_ERR_SEGMENT_ZERO = -32,
-    ELF32_ERR_PAGE_FLAGS = -33
+    ELF32_ERR_PAGE_FLAGS = -33,
+    ELF32_ERR_STACK_CONFLICT = -34,
+    ELF32_ERR_STACK_MAP = -35,
+    ELF32_ERR_TASK_CREATE = -36
 } elf32_status_t;
 
 int elf32_validate_header(
@@ -158,5 +161,10 @@ int elf32_load_image(
 );
 
 void elf32_unload_image(elf32_loaded_image_t *loaded);
+
+int elf32_spawn(
+    fs_node_t *node,
+    uint32_t *pid_out
+);
 
 const char *elf32_status_string(int status);
