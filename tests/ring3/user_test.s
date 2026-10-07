@@ -4,6 +4,10 @@
 .set CZK_ECHILD, 10
 .set CZK_EFAULT, 14
 .set CZK_ENOSYS, 38
+
+.set CZK_O_RDONLY, 0x0000
+.set CZK_O_RDWR,   0x0002
+.set CZK_O_CREAT,  0x0040
 .global user_test_entry
 
 user_test_entry:
@@ -117,6 +121,82 @@ fd_table_test_failed:
     int $0x80
 
 fd_table_test_done:
+
+    # open("ring3.txt", O_CREAT | O_RDWR)
+    mov $8, %eax
+    mov $fileio_path, %ebx
+    mov $(CZK_O_CREAT | CZK_O_RDWR), %ecx
+    int $0x80
+
+    cmp $3, %eax
+    jl fileio_test_failed
+
+    # write(fd, payload, payload_len)
+    mov %eax, %ebx
+    mov $1, %eax
+    mov $fileio_payload, %ecx
+    mov $(fileio_payload_end-fileio_payload), %edx
+    int $0x80
+
+    cmp $(fileio_payload_end-fileio_payload), %eax
+    jne fileio_test_failed
+
+    # close(fd)
+    mov $10, %eax
+    int $0x80
+
+    test %eax, %eax
+    jne fileio_test_failed
+
+    # reopen read-only
+    mov $8, %eax
+    mov $fileio_path, %ebx
+    mov $CZK_O_RDONLY, %ecx
+    int $0x80
+
+    cmp $3, %eax
+    jl fileio_test_failed
+
+    # read(fd, buffer, payload_len)
+    mov %eax, %ebx
+    mov $9, %eax
+    mov $fileio_buffer, %ecx
+    mov $(fileio_payload_end-fileio_payload), %edx
+    int $0x80
+
+    cmp $(fileio_payload_end-fileio_payload), %eax
+    jne fileio_test_failed
+
+    # Compare the bytes read back from RAMFS.
+    cld
+    mov $fileio_payload, %esi
+    mov $fileio_buffer, %edi
+    mov $(fileio_payload_end-fileio_payload), %ecx
+    repe cmpsb
+    jne fileio_test_failed
+
+    # close(fd)
+    mov $10, %eax
+    int $0x80
+
+    test %eax, %eax
+    jne fileio_test_failed
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $fileio_ok, %ecx
+    mov $(fileio_ok_end-fileio_ok), %edx
+    int $0x80
+    jmp fileio_test_done
+
+fileio_test_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $fileio_fail, %ecx
+    mov $(fileio_fail_end-fileio_fail), %edx
+    int $0x80
+
+fileio_test_done:
 
     # getpid()
     mov $3, %eax
@@ -303,6 +383,25 @@ fd_table_ok_end:
 fd_table_fail:
     .ascii "fdtable: stdio routing FAILED\n"
 fd_table_fail_end:
+
+fileio_path:
+    .asciz "ring3.txt"
+
+fileio_payload:
+    .ascii "CZK userspace file I/O works\n"
+fileio_payload_end:
+
+fileio_ok:
+    .ascii "fileio: roundtrip ok\n"
+fileio_ok_end:
+
+fileio_fail:
+    .ascii "fileio: roundtrip FAILED\n"
+fileio_fail_end:
+
+.align 16
+fileio_buffer:
+    .skip 64
 
 pid_message:
     .ascii "pid="
