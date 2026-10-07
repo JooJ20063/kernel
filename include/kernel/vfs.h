@@ -44,3 +44,7 @@ void vfs_set_root(fs_node_t *root);
 fs_node_t *vfs_root(void);
 fs_node_t *vfs_resolve(const char *path);
 fs_node_t *vfs_create(const char *path, uint32_t flags);
+
+int vfs_mount(const char *path, fs_node_t *root);
+int vfs_unmount(const char *path);
+uint32_t vfs_mount_count(void);
