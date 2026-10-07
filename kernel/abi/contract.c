@@ -13,6 +13,7 @@
 
 #include <kernel/fd.h>
 #include <kernel/vfs.h>
+#include <kernel/vmm.h>
 
 _Static_assert(CZK_ABI_VERSION_CURRENT == 0x00010000U,
                "ABI v1.0 encoding changed");
@@ -24,6 +25,12 @@ _Static_assert(CZK_ABI_POINTER_BITS == 32U,
                "pointer size changed");
 _Static_assert(CZK_ABI_STACK_ALIGNMENT == 16U,
                "startup stack alignment changed");
+_Static_assert(CZK_ABI_STACK_TOP == 0xFF800000U,
+               "ABI v1 stack top changed");
+_Static_assert(CZK_ABI_STACK_BOTTOM == 0xFF000000U,
+               "ABI v1 stack reserve changed");
+_Static_assert(CZK_ABI_STACK_INITIAL_PAGES == 4U,
+               "ABI v1 initial stack mapping changed");
 
 _Static_assert(sizeof(void *) == 4U,
                "CZK x86 ABI requires 32-bit pointers");
@@ -72,3 +79,7 @@ _Static_assert(FD_TABLE_MAX == CZK_OPEN_MAX,
                "kernel FD table diverged from ABI v1");
 _Static_assert(VFS_NAME_MAX == CZK_NAME_MAX,
                "kernel VFS name limit diverged from ABI v1");
+_Static_assert(VMM_USER_MIN_ADDR == CZK_ABI_USER_VA_MIN,
+               "kernel user VA minimum diverged from ABI v1");
+_Static_assert(VMM_USER_MAX_ADDR == CZK_ABI_USER_VA_MAX,
+               "kernel user VA maximum diverged from ABI v1");
