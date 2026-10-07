@@ -81,9 +81,9 @@ registers_t *syscall_handler(registers_t *regs) {
             uint32_t len = regs->edx;
             uint32_t offset = 0U;
             uint8_t kernel_buf[128];
-            task_t *task = sched_current_task_ptr();
+            process_t *process = sched_current_process_ptr();
 
-            if (task == 0 || !fd_is_writable(&task->fds, fd)) {
+            if (process == 0 || !fd_is_writable(&process->fds, fd)) {
                 regs->eax = syscall_error(CZK_EBADF);
                 break;
             }
@@ -115,7 +115,7 @@ registers_t *syscall_handler(registers_t *regs) {
                     break;
                 }
 
-                written = fd_write(&task->fds, fd, kernel_buf, chunk);
+                written = fd_write(&process->fds, fd, kernel_buf, chunk);
                 if (written < 0) {
                     regs->eax = syscall_error(CZK_EBADF);
                     break;
@@ -202,9 +202,9 @@ registers_t *syscall_handler(registers_t *regs) {
             int copy_result;
             fs_node_t *node;
             int32_t fd;
-            task_t *task = sched_current_task_ptr();
+            process_t *process = sched_current_process_ptr();
 
-            if (task == 0) {
+            if (process == 0) {
                 regs->eax = syscall_error(CZK_EBADF);
                 break;
             }
@@ -254,7 +254,7 @@ registers_t *syscall_handler(registers_t *regs) {
                 break;
             }
 
-            fd = fd_open_vfs(&task->fds, node, access);
+            fd = fd_open_vfs(&process->fds, node, access);
             if (fd == -1) {
                 regs->eax = syscall_error(CZK_EMFILE);
                 break;
@@ -276,9 +276,9 @@ registers_t *syscall_handler(registers_t *regs) {
             uint32_t len = regs->edx;
             uint32_t total = 0U;
             uint8_t kernel_buf[128];
-            task_t *task = sched_current_task_ptr();
+            process_t *process = sched_current_process_ptr();
 
-            if (task == 0 || !fd_is_readable(&task->fds, fd)) {
+            if (process == 0 || !fd_is_readable(&process->fds, fd)) {
                 regs->eax = syscall_error(CZK_EBADF);
                 break;
             }
@@ -297,7 +297,7 @@ registers_t *syscall_handler(registers_t *regs) {
                     chunk = (uint32_t)sizeof(kernel_buf);
                 }
 
-                count = fd_read(&task->fds, fd, kernel_buf, chunk);
+                count = fd_read(&process->fds, fd, kernel_buf, chunk);
                 if (count < 0) {
                     regs->eax = syscall_error(CZK_EBADF);
                     break;
@@ -333,9 +333,9 @@ registers_t *syscall_handler(registers_t *regs) {
 
         case SYS_CLOSE: {
             uint32_t fd = regs->ebx;
-            task_t *task = sched_current_task_ptr();
+            process_t *process = sched_current_process_ptr();
 
-            if (task == 0 || fd_close(&task->fds, fd) != 0) {
+            if (process == 0 || fd_close(&process->fds, fd) != 0) {
                 regs->eax = syscall_error(CZK_EBADF);
                 break;
             }
@@ -350,15 +350,15 @@ registers_t *syscall_handler(registers_t *regs) {
             uint32_t whence = regs->edx;
             uint32_t new_offset = 0U;
             int32_t result;
-            task_t *task = sched_current_task_ptr();
+            process_t *process = sched_current_process_ptr();
 
-            if (task == 0) {
+            if (process == 0) {
                 regs->eax = syscall_error(CZK_EBADF);
                 break;
             }
 
             result = fd_seek(
-                &task->fds,
+                &process->fds,
                 fd,
                 offset,
                 whence,
@@ -389,11 +389,11 @@ registers_t *syscall_handler(registers_t *regs) {
             czk_stat_t *user_stat =
                 (czk_stat_t *)(uintptr_t)regs->ecx;
             czk_stat_t stat;
-            task_t *task = sched_current_task_ptr();
+            process_t *process = sched_current_process_ptr();
 
-            if (task == 0 ||
+            if (process == 0 ||
                 fd_stat(
-                    &task->fds,
+                    &process->fds,
                     fd,
                     &stat.st_size,
                     &stat.st_flags) != 0) {
@@ -417,14 +417,14 @@ registers_t *syscall_handler(registers_t *regs) {
             czk_dirent_t dirent;
             fs_node_t *node = 0;
             int32_t result;
-            task_t *task = sched_current_task_ptr();
+            process_t *process = sched_current_process_ptr();
 
-            if (task == 0) {
+            if (process == 0) {
                 regs->eax = syscall_error(CZK_EBADF);
                 break;
             }
 
-            result = fd_readdir(&task->fds, fd, &node);
+            result = fd_readdir(&process->fds, fd, &node);
 
             if (result == -1) {
                 regs->eax = syscall_error(CZK_EBADF);

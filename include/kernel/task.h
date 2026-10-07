@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <arch/x86/regs.h>
-#include <kernel/fd.h>
+#include <kernel/process.h>
 
 typedef enum task_state {
     TASK_UNUSED = 0,
@@ -20,28 +20,23 @@ typedef enum task_block_reason {
 } task_block_reason_t;
 
 typedef struct task_struct {
-    uint32_t pid; // Process ID
-    uint32_t parent_pid; // Parent Process ID
-    const char *name;
+    uint32_t tid;
+    process_t *process;
 
-    task_state_t state; // Current state of the task
-    int32_t exit_code;
-    task_block_reason_t block_reason; // Reason for blocking
-    registers_t *context; // CPU context (registers)
+    task_state_t state;
+    task_block_reason_t block_reason;
+    registers_t *context;
     uint32_t wake_tick;
 
     uint8_t *kernel_stack;
     uint32_t kernel_stack_size;
 
-    uint32_t cr3;
     uint8_t *fpu_storage;
     uint8_t *fpu_area;
     uint32_t fpu_initialized;
 
-    fd_table_t fds;
-
-    struct task_struct *next; // Pointer to the next task in the task list
-    struct task_struct *wait_next; // Pointer to the previous task in the task list
+    struct task_struct *next;
+    struct task_struct *wait_next;
 } task_t;
 
 typedef struct wait_queue {
@@ -95,5 +90,6 @@ void task_block(void);
 void task_wake(task_t *task);
 
 task_t *sched_current_task_ptr(void);
+process_t *sched_current_process_ptr(void);
 
 #endif // KERNEL_TASK_H
