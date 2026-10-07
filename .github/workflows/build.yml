@@ -28,6 +28,7 @@ jobs:
             grub-common \
             grub-pc-bin \
             xorriso \
+            mtools \
             ripgrep
 
       - name: Sanity checks
