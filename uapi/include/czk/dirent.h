@@ -2,8 +2,10 @@
 #define CZK_UAPI_DIRENT_H
 
 #include <stdint.h>
+#include <czk/abi.h>
+#include <czk/fs.h>
 
-#define CZK_DIRENT_NAME_MAX 128U
+#define CZK_DIRENT_NAME_MAX CZK_NAME_MAX
 
 typedef struct czk_dirent {
     char d_name[CZK_DIRENT_NAME_MAX];
