@@ -778,9 +778,68 @@ static void shell_cmd_tmptest(void) {
     pmm_free_frame(src_frame);
 }
 
+static void shell_cmd_mounttest(void) {
+    fs_node_t *source;
+    fs_node_t *target;
+    fs_node_t *probe;
+    fs_node_t *mounted_root;
+    fs_node_t *mounted_probe;
+    uint8_t ok = 1U;
+
+    source = vfs_resolve("/tmp");
+    if (source == 0) {
+        klog_warn("mounttest: /tmp unavailable");
+        return;
+    }
+
+    target = vfs_create("/mnttest", FS_DIRECTORY);
+    if (target == 0) {
+        klog_warn("mounttest: failed to create /mnttest");
+        return;
+    }
+
+    probe = vfs_create(
+        "/tmp/__mount_probe",
+        FS_FILE | FS_WRITABLE
+    );
+    if (probe == 0) {
+        klog_warn("mounttest: failed to create probe");
+        return;
+    }
+
+    if (vfs_mount("/mnttest", source) != 0) {
+        klog_warn("mounttest: mount failed");
+        return;
+    }
+
+    mounted_root = vfs_resolve("/mnttest");
+    mounted_probe =
+        vfs_resolve("/mnttest/__mount_probe");
+
+    if (mounted_root != source ||
+        mounted_probe != probe ||
+        vfs_mount_count() == 0U) {
+        ok = 0U;
+    }
+
+    if (vfs_unmount("/mnttest") != 0) {
+        ok = 0U;
+    }
+
+    if (vfs_resolve("/mnttest") != target ||
+        vfs_resolve("/mnttest/__mount_probe") != 0 ||
+        vfs_mount_count() != 0U) {
+        ok = 0U;
+    }
+
+    vga_puts("mounttest: result=");
+    vga_puts(ok ? "MOUNT OK" : "FAILED");
+    vga_puts("\n");
+}
+
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
@@ -861,6 +920,8 @@ static void shell_run_command(const char *cmd) {
         vga_puts("\n");
     } else if (str_eq(cmd, "tmptest")) {
         shell_cmd_tmptest();
+    } else if (str_eq(cmd, "mounttest")) {
+        shell_cmd_mounttest();
     } else if (str_eq(cmd, "wp")) {
         vga_puts("CR0.WP=");
         vga_puts(vmm_wp_is_enabled() ? "ON" : "OFF");
