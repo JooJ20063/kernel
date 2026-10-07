@@ -46,11 +46,23 @@ Separação atual:
 - destruição do address space junto do processo;
 - sincronização dos mappings de heap do kernel.
 
-Limitação atual: estruturas de paginação e cópias do userspace usam frames abaixo de 12 MiB para permanecerem acessíveis pelo identity mapping bootstrap.
+A temporary mapping window supervisor-only em `0xFF800000` já permite copiar, ler e zerar frames físicos fora do identity mapping bootstrap. As páginas de userspace podem portanto usar qualquer frame administrado pelo PMM.
 
-Próximo passo: temporary mapping window / mapeamento de frames altos, seguido por `brk` e ELF.
+Limitação remanescente: page directories/page tables continuam abaixo de 12 MiB até termos recursive paging ou outro mecanismo para manipular estruturas de paginação em frames altos.
 
-## 5. ELF loader
+## 5. VFS hierárquico e namespace raiz
+
+Antes de cristalizar paths no ELF/userspace:
+
+- resolução componente a componente (`/bin/hello`);
+- diretórios reais no RAMFS;
+- mount points;
+- raiz inicial planejada com `/bin`, `/dev`, `/proc`, `/etc`, `/lib` e `/tmp`;
+- preparar `devfs` e `procfs` como filesystems montáveis, sem special-cases em `open()`.
+
+O shell atual permanece monitor Ring 0. O futuro `/bin/sh` será Ring 3 e usará uma TTY através de `/dev/tty1`.
+
+## 6. ELF loader
 
 - parser ELF;
 - `PT_LOAD`;
@@ -59,7 +71,19 @@ Próximo passo: temporary mapping window / mapeamento de frames altos, seguido p
 - entry point;
 - execução CPL3 a partir do VFS.
 
-## 6. CLibC v0.1
+## 6.1. Infraestrutura de devices e sistema
+
+Planejamento já definido para a primeira geração de userspace:
+
+- `devfs` com pelo menos `/dev/null`, `/dev/zero`, `/dev/tty1`, `/dev/random` e `/dev/urandom`;
+- TTY layer entre teclado/console e os FDs 0/1/2 do shell Ring 3;
+- `/dev/random` e `/dev/urandom` apoiados por um subsistema real de entropia + CSPRNG, não por PRNG de teste;
+- `procfs` para informações virtuais de processos/kernel;
+- timekeeping separado em relógio monotônico e realtime, inicializado a partir do RTC e futuramente disciplinado por rede.
+
+Esses blocos não são pré-requisitos para o primeiro ELF mínimo, mas são parte do caminho crítico para `/bin/init` e `/bin/sh`.
+
+## 7. CLibC v0.1
 
 Projeto userspace separado, consumindo os headers de `uapi/`:
 
@@ -72,20 +96,20 @@ Projeto userspace separado, consumindo os headers de `uapi/`:
 
 Depois: `brk`, allocator e stdio.
 
-## 7. Userspace real
+## 8. Userspace real
 
 - init;
 - primeiros executáveis ELF;
 - shell Ring 3;
 - shell atual preservado como monitor de diagnóstico Ring 0.
 
-## 8. Storage e filesystem persistente
+## 9. Storage e filesystem persistente
 
 - block layer;
 - driver de armazenamento;
 - filesystem persistente;
 - RAMFS mantido para testes/initramfs.
 
-## 9. Retomada do x86-64
+## 10. Retomada do x86-64
 
 Portar a arquitetura estabilizada de processos, ABI, ELF e userspace para x86-64 em vez de desenvolver dois modelos em paralelo.
