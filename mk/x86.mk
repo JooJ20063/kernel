@@ -23,6 +23,7 @@ C_SRCS := \
 	kernel/sched/task.c \
 	kernel/debug/shell.c \
 	kernel/syscall/syscall.c \
+	kernel/uaccess/uaccess.c \
 	arch/x86/cpu/idt.c \
 	arch/x86/cpu/irq.c \
 	arch/x86/cpu/pic.c \
