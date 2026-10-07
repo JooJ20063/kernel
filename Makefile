@@ -3,7 +3,7 @@ AS := as
 LD := ld
 
 
-CFLAGS := -m32 -ffreestanding -Iinclude -Ilibk/include -Iuapi/include -Wall -Wextra -Werror
+CFLAGS := -m32 -ffreestanding -Iinclude -Ilibk/include -Iuapi/include -Iarch/x86/include -Wall -Wextra -Werror
 KERNEL_X86_NOSIMD := -mno-sse -mno-sse2 -mno-mmx
 override CFLAGS += $(KERNEL_X86_NOSIMD)
 ASFLAGS := --32
@@ -33,11 +33,11 @@ C_SRCS := \
 	kernel/core/klog.c \
 	kernel/core/panic.c \
 	kernel/debug/shell.c \
-	arch/x86/idt.c \
-	arch/x86/irq.c \
-	arch/x86/pic.c \
-	arch/x86/fpu.c \
-	arch/x86/tss.c \
+	arch/x86/cpu/idt.c \
+	arch/x86/cpu/irq.c \
+	arch/x86/cpu/pic.c \
+	arch/x86/cpu/fpu.c \
+	arch/x86/cpu/tss.c \
 	kernel/syscall/syscall.c
 
 
