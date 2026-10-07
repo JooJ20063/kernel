@@ -24,6 +24,7 @@ C_SRCS := \
 	kernel/fs/ramfs.c \
 	kernel/fs/devfs.c \
 	kernel/fs/tty.c \
+	kernel/exec/elf32.c \
 	kernel/sched/process.c \
 	kernel/sched/task.c \
 	kernel/debug/ring0_shell.c \
