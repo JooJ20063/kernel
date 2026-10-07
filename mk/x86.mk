@@ -10,10 +10,13 @@ LDFLAGS ?= -m elf_i386 -T arch/x86/linker.ld
 DEPFLAGS := -MMD -MP
 
 USER_ELF_DIR := $(BUILD_DIR)/userspace
-USER_HELLO_OBJ := $(USER_ELF_DIR)/hello.o
-USER_HELLO := $(USER_ELF_DIR)/hello
+USER_PROGRAM_NAMES := hello execprobe
+USER_PROGRAM_OBJS := $(addprefix $(USER_ELF_DIR)/,$(addsuffix .o,$(USER_PROGRAM_NAMES)))
+USER_PROGRAMS := $(addprefix $(USER_ELF_DIR)/,$(USER_PROGRAM_NAMES))
+USER_CRT0_OBJ := $(USER_ELF_DIR)/crt0.o
 INITRD_ROOT := $(BUILD_DIR)/initrd-root
 INITRD_IMAGE := $(BUILD_DIR)/initrd.tar
+USER_CPPFLAGS := -Iuapi/include
 USER_CFLAGS := -m32 -ffreestanding -Wall -Wextra -Werror -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables
 
 C_SRCS := \
@@ -68,17 +71,21 @@ $(BUILD_DIR)/%.o: %.s
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) $< -o $@
 
-$(USER_HELLO_OBJ): tests/elf/hello.c
+$(USER_CRT0_OBJ): tests/elf/crt0.s
 	@mkdir -p $(dir $@)
-	$(CC) $(USER_CFLAGS) -c $< -o $@
+	$(AS) $(ASFLAGS) $< -o $@
 
-$(USER_HELLO): $(USER_HELLO_OBJ) tests/elf/user.ld
-	$(LD) -m elf_i386 -T tests/elf/user.ld -o $@ $(USER_HELLO_OBJ)
+$(USER_ELF_DIR)/%.o: tests/elf/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CPPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
-$(INITRD_IMAGE): $(USER_HELLO)
+$(USER_ELF_DIR)/%: $(USER_ELF_DIR)/%.o $(USER_CRT0_OBJ) tests/elf/user.ld
+	$(LD) -m elf_i386 -T tests/elf/user.ld -o $@ $(USER_CRT0_OBJ) $<
+
+$(INITRD_IMAGE): $(USER_PROGRAMS)
 	rm -rf $(INITRD_ROOT)
 	mkdir -p $(INITRD_ROOT)/bin
-	cp $(USER_HELLO) $(INITRD_ROOT)/bin/hello
-	tar --format=ustar -C $(INITRD_ROOT) -cf $@ bin/hello
+	cp $(USER_PROGRAMS) $(INITRD_ROOT)/bin/
+	tar --format=ustar -C $(INITRD_ROOT) -cf $@ $(addprefix bin/,$(USER_PROGRAM_NAMES))
 
 -include $(DEPS)
