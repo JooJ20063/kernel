@@ -4,8 +4,8 @@
 #include <kernel/task.h>
 
 #define ELF32_ADDR_MAX 0xFFFFFFFFU
-#define ELF32_USER_STACK_PAGES 4U
-#define ELF32_USER_STACK_TOP VMM_USER_MAX_ADDR
+#define ELF32_USER_STACK_PAGES CZK_ABI_STACK_INITIAL_PAGES
+#define ELF32_USER_STACK_TOP   CZK_ABI_STACK_TOP
 
 _Static_assert(sizeof(elf32_ehdr_t) == 52U, "ELF32 header size mismatch");
 _Static_assert(sizeof(elf32_phdr_t) == 32U, "ELF32 program header size mismatch");
@@ -118,8 +118,8 @@ static int elf32_validate_user_load_range(
     segment_end =
         program_header->p_vaddr + program_header->p_memsz;
 
-    if (program_header->p_vaddr < VMM_USER_MIN_ADDR ||
-        segment_end > VMM_USER_MAX_ADDR) {
+    if (program_header->p_vaddr < CZK_ABI_USER_VA_MIN ||
+        segment_end > CZK_ABI_STACK_BOTTOM) {
         return ELF32_ERR_SEGMENT_USER_RANGE;
     }
 
@@ -131,8 +131,8 @@ static int elf32_validate_user_load_range(
         (segment_end + VMM_PAGE_SIZE - 1U) &
         ~(uint32_t)(VMM_PAGE_SIZE - 1U);
 
-    if (page_start < VMM_USER_MIN_ADDR ||
-        page_end > VMM_USER_MAX_ADDR ||
+    if (page_start < CZK_ABI_USER_VA_MIN ||
+        page_end > CZK_ABI_STACK_BOTTOM ||
         page_start >= page_end) {
         return ELF32_ERR_SEGMENT_USER_RANGE;
     }
