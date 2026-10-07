@@ -4,10 +4,43 @@
 #include <kernel/sched.h>
 #include <kernel/uaccess.h>
 #include <kernel/fd.h>
+#include <kernel/ramfs.h>
 #include <czk/errno.h>
+#include <czk/fcntl.h>
 
 static uint32_t syscall_error(uint32_t error_number) {
     return (uint32_t)(-(int32_t)error_number);
+}
+
+static int syscall_open_access(uint32_t flags, uint32_t *access_out) {
+    uint32_t mode;
+
+    if (access_out == 0) {
+        return -1;
+    }
+
+    if ((flags & ~(CZK_O_ACCMODE | CZK_O_CREAT)) != 0U) {
+        return -1;
+    }
+
+    mode = flags & CZK_O_ACCMODE;
+
+    switch (mode) {
+        case CZK_O_RDONLY:
+            *access_out = FD_ACCESS_READ;
+            return 0;
+
+        case CZK_O_WRONLY:
+            *access_out = FD_ACCESS_WRITE;
+            return 0;
+
+        case CZK_O_RDWR:
+            *access_out = FD_ACCESS_READ | FD_ACCESS_WRITE;
+            return 0;
+
+        default:
+            return -1;
+    }
 }
 
 registers_t *syscall_handler(registers_t *regs) {
@@ -132,6 +165,153 @@ registers_t *syscall_handler(registers_t *regs) {
             }
 
             regs->eax = (uint32_t)pid;
+            break;
+        }
+
+        case SYS_OPEN: {
+            const char *user_path =
+                (const char *)(uintptr_t)regs->ebx;
+            uint32_t flags = regs->ecx;
+            uint32_t access;
+            char path[128];
+            int copy_result;
+            fs_node_t *node;
+            int32_t fd;
+            task_t *task = sched_current_task_ptr();
+
+            if (task == 0) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            if (syscall_open_access(flags, &access) != 0) {
+                regs->eax = syscall_error(CZK_EINVAL);
+                break;
+            }
+
+            copy_result = copy_string_from_user(
+                path,
+                user_path,
+                sizeof(path)
+            );
+
+            if (copy_result == -1) {
+                regs->eax = syscall_error(CZK_EFAULT);
+                break;
+            }
+
+            if (copy_result == -2) {
+                regs->eax = syscall_error(CZK_ENAMETOOLONG);
+                break;
+            }
+
+            if (path[0] == 0) {
+                regs->eax = syscall_error(CZK_EINVAL);
+                break;
+            }
+
+            node = ramfs_find(path);
+
+            if (node == 0 && (flags & CZK_O_CREAT) != 0U) {
+                node = ramfs_touch(path);
+                if (node == 0) {
+                    regs->eax = syscall_error(CZK_ENOMEM);
+                    break;
+                }
+            }
+
+            if (node == 0) {
+                regs->eax = syscall_error(CZK_ENOENT);
+                break;
+            }
+
+            fd = fd_open_vfs(&task->fds, node, access);
+            if (fd == -1) {
+                regs->eax = syscall_error(CZK_EMFILE);
+                break;
+            }
+
+            if (fd == -2) {
+                regs->eax = syscall_error(CZK_EACCES);
+                break;
+            }
+
+            regs->eax = (uint32_t)fd;
+            break;
+        }
+
+        case SYS_READ: {
+            uint32_t fd = regs->ebx;
+            uint8_t *user_buf =
+                (uint8_t *)(uintptr_t)regs->ecx;
+            uint32_t len = regs->edx;
+            uint32_t total = 0U;
+            uint8_t kernel_buf[128];
+            task_t *task = sched_current_task_ptr();
+
+            if (task == 0 || !fd_is_readable(&task->fds, fd)) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            if (!user_ptr_valid(user_buf, len, 1)) {
+                regs->eax = syscall_error(CZK_EFAULT);
+                break;
+            }
+
+            while (total < len) {
+                uint32_t remaining = len - total;
+                uint32_t chunk = remaining;
+                int32_t count;
+
+                if (chunk > (uint32_t)sizeof(kernel_buf)) {
+                    chunk = (uint32_t)sizeof(kernel_buf);
+                }
+
+                count = fd_read(&task->fds, fd, kernel_buf, chunk);
+                if (count < 0) {
+                    regs->eax = syscall_error(CZK_EBADF);
+                    break;
+                }
+
+                if (count == 0) {
+                    regs->eax = total;
+                    break;
+                }
+
+                if (copy_to_user(
+                        (void *)((uintptr_t)user_buf + total),
+                        kernel_buf,
+                        (uint32_t)count) != 0) {
+                    regs->eax = syscall_error(CZK_EFAULT);
+                    break;
+                }
+
+                total += (uint32_t)count;
+
+                if ((uint32_t)count < chunk) {
+                    regs->eax = total;
+                    break;
+                }
+            }
+
+            if (total == len) {
+                regs->eax = total;
+            }
+
+            break;
+        }
+
+        case SYS_CLOSE: {
+            uint32_t fd = regs->ebx;
+            task_t *task = sched_current_task_ptr();
+
+            if (task == 0 || fd_close(&task->fds, fd) != 0) {
+                regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            regs->eax = 0U;
             break;
         }
 
