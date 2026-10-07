@@ -115,6 +115,33 @@ void pmm_init_from_multiboot(uint32_t mb_info_addr, uintptr_t kernel_start, uint
         total_frames = max_addr / PMM_FRAME_SIZE;
     }
 
+    /*
+     * GRUB modules may contain the initrd. Reserve them only after the
+     * memory-map pass so an AVAILABLE entry cannot accidentally free the
+     * same frames again.
+     */
+    tag = (struct multiboot2_tag *)((uintptr_t)mb_info_addr + 8U);
+    while ((uintptr_t)tag < info_end &&
+           tag->type != MULTIBOOT2_TAG_END) {
+        if (tag->type == MULTIBOOT2_TAG_MODULE) {
+            struct multiboot2_tag_module *module =
+                (struct multiboot2_tag_module *)tag;
+
+            if (module->mod_end > module->mod_start) {
+                pmm_mark_range(
+                    (uintptr_t)module->mod_start,
+                    (uintptr_t)module->mod_end,
+                    1
+                );
+            }
+        }
+
+        tag = (struct multiboot2_tag *)(
+            ((uintptr_t)tag + tag->size + 7U) &
+            ~(uintptr_t)7U
+        );
+    }
+
     pmm_mark_range(0, 0x100000U, 1);
     pmm_mark_range(kernel_start, kernel_end, 1);
     pmm_mark_range((uintptr_t)mb_info_addr, info_end, 1);
