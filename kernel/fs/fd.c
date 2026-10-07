@@ -1,5 +1,6 @@
 #include <kernel/fd.h>
 #include <kernel/vfs.h>
+#include <czk/abi.h>
 
 static void fd_entry_clear(fd_entry_t *entry) {
     entry->kind = FD_KIND_NONE;
@@ -240,8 +241,12 @@ int32_t fd_seek(
 
     result = base + (int64_t)offset;
 
-    if (result < 0 || (uint64_t)result > 0xFFFFFFFFULL) {
+    if (result < 0) {
         return -3;
+    }
+
+    if ((uint64_t)result > (uint64_t)CZK_OFF_MAX) {
+        return -4;
     }
 
     entry->offset = (uint32_t)result;
