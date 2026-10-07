@@ -4,10 +4,13 @@
 .set CZK_ECHILD, 10
 .set CZK_EFAULT, 14
 .set CZK_ENOSYS, 38
+.set CZK_ESPIPE, 29
 
 .set CZK_O_RDONLY, 0x0000
 .set CZK_O_RDWR,   0x0002
 .set CZK_O_CREAT,  0x0040
+
+.set CZK_SEEK_SET, 0
 .global user_test_entry
 
 user_test_entry:
@@ -157,8 +160,19 @@ fd_table_test_done:
     cmp $3, %eax
     jl fileio_test_failed
 
-    # read(fd, buffer, payload_len)
+    # fstat(fd, &stat)
     mov %eax, %ebx
+    mov $12, %eax
+    mov $fileio_stat, %ecx
+    int $0x80
+
+    test %eax, %eax
+    jne fileio_test_failed
+
+    cmp $(fileio_payload_end-fileio_payload), fileio_stat
+    jne fileio_test_failed
+
+    # read(fd, buffer, payload_len)
     mov $9, %eax
     mov $fileio_buffer, %ecx
     mov $(fileio_payload_end-fileio_payload), %edx
@@ -172,6 +186,31 @@ fd_table_test_done:
     mov $fileio_payload, %esi
     mov $fileio_buffer, %edi
     mov $(fileio_payload_end-fileio_payload), %ecx
+    repe cmpsb
+    jne fileio_test_failed
+
+    # lseek(fd, 4, SEEK_SET)
+    mov $11, %eax
+    mov $4, %ecx
+    mov $CZK_SEEK_SET, %edx
+    int $0x80
+
+    cmp $4, %eax
+    jne fileio_test_failed
+
+    # Read a slice after seeking and compare it with payload + 4.
+    mov $9, %eax
+    mov $fileio_seek_buffer, %ecx
+    mov $8, %edx
+    int $0x80
+
+    cmp $8, %eax
+    jne fileio_test_failed
+
+    cld
+    mov $(fileio_payload + 4), %esi
+    mov $fileio_seek_buffer, %edi
+    mov $8, %ecx
     repe cmpsb
     jne fileio_test_failed
 
@@ -197,6 +236,32 @@ fileio_test_failed:
     int $0x80
 
 fileio_test_done:
+
+    # stdout is not seekable.
+    mov $11, %eax
+    mov $1, %ebx
+    xor %ecx, %ecx
+    mov $CZK_SEEK_SET, %edx
+    int $0x80
+
+    cmp $-CZK_ESPIPE, %eax
+    jne seek_stdio_test_failed
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $seek_stat_ok, %ecx
+    mov $(seek_stat_ok_end-seek_stat_ok), %edx
+    int $0x80
+    jmp seek_stdio_test_done
+
+seek_stdio_test_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $seek_stat_fail, %ecx
+    mov $(seek_stat_fail_end-seek_stat_fail), %edx
+    int $0x80
+
+seek_stdio_test_done:
 
     # getpid()
     mov $3, %eax
@@ -399,9 +464,25 @@ fileio_fail:
     .ascii "fileio: roundtrip FAILED\n"
 fileio_fail_end:
 
+seek_stat_ok:
+    .ascii "fileio: lseek/fstat ok\n"
+seek_stat_ok_end:
+
+seek_stat_fail:
+    .ascii "fileio: lseek/fstat FAILED\n"
+seek_stat_fail_end:
+
 .align 16
 fileio_buffer:
     .skip 64
+
+.align 4
+fileio_stat:
+    .skip 8
+
+.align 16
+fileio_seek_buffer:
+    .skip 16
 
 pid_message:
     .ascii "pid="
