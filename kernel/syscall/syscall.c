@@ -4,7 +4,7 @@
 #include <kernel/sched.h>
 #include <kernel/uaccess.h>
 #include <kernel/fd.h>
-#include <kernel/ramfs.h>
+#include <kernel/vfs.h>
 #include <czk/errno.h>
 #include <czk/fcntl.h>
 #include <czk/seek.h>
@@ -235,16 +235,15 @@ registers_t *syscall_handler(registers_t *regs) {
                 break;
             }
 
-            if (path[0] == '/' && path[1] == 0) {
-                node = ramfs_root();
-            } else {
-                node = ramfs_find(path);
-            }
+            node = vfs_resolve(path);
 
             if (node == 0 && (flags & CZK_O_CREAT) != 0U) {
-                node = ramfs_touch(path);
+                node = vfs_create(
+                    path,
+                    FS_FILE | FS_WRITABLE
+                );
                 if (node == 0) {
-                    regs->eax = syscall_error(CZK_ENOMEM);
+                    regs->eax = syscall_error(CZK_ENOENT);
                     break;
                 }
             }
