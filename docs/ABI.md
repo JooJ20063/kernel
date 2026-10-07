@@ -250,14 +250,25 @@ The v1 native executable format is static ELF32 for i386:
 - bytes in `p_memsz - p_filesz` are zero-filled;
 - `p_align > 1` must be a power of two and satisfy ELF offset/address congruence.
 
-Loadable virtual memory must fit entirely inside:
+The process userspace virtual-address envelope is:
 
 ```text
-CZK_ABI_USER_VA_MIN <= PT_LOAD < CZK_ABI_USER_VA_MAX
-0x01000000                         0xFF800000
+CZK_ABI_USER_VA_MIN = 0x01000000
+CZK_ABI_USER_VA_MAX = 0xFF800000   (exclusive)
 ```
 
-The upper bound is exclusive.
+The upper 8 MiB of that envelope is reserved for the downward-growing
+userspace stack:
+
+```text
+0xFF000000  CZK_ABI_STACK_BOTTOM
+    ...
+0xFF800000  CZK_ABI_STACK_TOP
+```
+
+Therefore every `PT_LOAD` must end at or below
+`CZK_ABI_STACK_BOTTOM`. ELF segments may not consume the reserved stack
+region.
 
 ABI v1 does not provide hardware NX enforcement on CZK_x86; ELF execute flags are nevertheless validated and retained as executable-format semantics.
 
@@ -266,7 +277,12 @@ ABI v1 does not provide hardware NX enforcement on CZK_x86; ELF execute flags ar
 At ELF entry:
 
 - EIP equals the ELF `e_entry`;
+- ESP is at or below `CZK_ABI_STACK_TOP`;
 - ESP is aligned to `CZK_ABI_STACK_ALIGNMENT` (16 bytes);
+- the kernel initially maps `CZK_ABI_STACK_INITIAL_PAGES` (4) writable
+  pages at the top of the reserved stack region;
+- the remainder of the 8 MiB stack reserve is intentionally available for
+  compatible future stack-growth mechanisms;
 - general-purpose register values other than ESP are unspecified;
 - valid Ring 3 code/data segments are installed.
 
