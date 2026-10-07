@@ -2,8 +2,9 @@
 #define KERNEL_FD_H
 
 #include <stdint.h>
+#include <czk/abi.h>
 
-#define FD_TABLE_MAX 16U
+#define FD_TABLE_MAX CZK_OPEN_MAX
 
 #define FD_ACCESS_READ  0x01U
 #define FD_ACCESS_WRITE 0x02U
