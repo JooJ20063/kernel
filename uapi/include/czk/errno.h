@@ -9,6 +9,7 @@
  */
 #define CZK_ENOENT  2
 #define CZK_EBADF   9
+#define CZK_ENOMEM 12
 #define CZK_EACCES 13
 #define CZK_ECHILD 10
 #define CZK_EFAULT 14
