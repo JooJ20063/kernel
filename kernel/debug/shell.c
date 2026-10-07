@@ -180,6 +180,12 @@ static void shell_prompt(void) {
     vga_set_color(0x0F, 0x00);
 }
 
+void shell_resume_input(void) {
+    line_len = 0U;
+    vga_puts("\n[tty] input focus returned to kernel shell");
+    shell_prompt();
+}
+
 static int heap_find_free_slot(void) {
     for (int i = 0; i < KHEAP_SLOTS; ++i) {
         if (heap_slots[i] == 0) {
@@ -1047,6 +1053,43 @@ static void shell_cmd_stdiotest(void) {
     vga_puts("\n");
 }
 
+static void shell_cmd_ttyfocus(const char *arg) {
+    if (arg == 0 || *arg == 0) {
+        vga_puts("ttyfocus: ");
+        vga_puts(
+            tty1_input_focus() == TTY_INPUT_FOCUS_TTY1
+                ? "tty1"
+                : "shell"
+        );
+        vga_puts(" pending=");
+        vga_putdec(tty1_pending());
+        vga_puts("\n");
+        return;
+    }
+
+    if (str_eq(arg, "shell")) {
+        tty1_set_input_focus(TTY_INPUT_FOCUS_SHELL);
+        vga_puts("ttyfocus: kernel shell\n");
+        return;
+    }
+
+    if (str_eq(arg, "tty1")) {
+        /*
+         * Input typed while the kernel shell owns the console must never
+         * become stale stdin for the future foreground userspace task.
+         */
+        tty1_flush_input();
+        tty1_set_input_focus(TTY_INPUT_FOCUS_TTY1);
+        vga_puts(
+            "ttyfocus: /dev/tty1 owns input "
+            "(F12 or Ctrl+] returns to kernel shell)\n"
+        );
+        return;
+    }
+
+    klog_warn("usage: ttyfocus [shell|tty1]");
+}
+
 #ifndef __x86_64__
 static void ttyblock_waker_task(void) {
     task_sleep_ticks(100U);
@@ -1057,7 +1100,7 @@ static void ttyblock_waker_task(void) {
 
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest stdiotest ttyblocktest wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest stdiotest ttyblocktest ttyfocus wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
@@ -1146,6 +1189,10 @@ static void shell_run_command(const char *cmd) {
         shell_cmd_ttytest();
     } else if (str_eq(cmd, "stdiotest")) {
         shell_cmd_stdiotest();
+    } else if (str_eq(cmd, "ttyfocus")) {
+        shell_cmd_ttyfocus(0);
+    } else if (str_starts(cmd, "ttyfocus ")) {
+        shell_cmd_ttyfocus(skip_spaces(cmd + 9));
     } else if (str_eq(cmd, "wp")) {
         vga_puts("CR0.WP=");
         vga_puts(vmm_wp_is_enabled() ? "ON" : "OFF");
@@ -1429,7 +1476,11 @@ void shell_on_key(char c) {
         line[line_len] = 0;
         shell_run_command(line);
         line_len = 0;
-        shell_prompt();
+
+        if (tty1_input_focus() == TTY_INPUT_FOCUS_SHELL) {
+            shell_prompt();
+        }
+
         return;
     }
 
