@@ -161,6 +161,34 @@ uint32_t pmm_alloc_frame_below(uint32_t limit_addr) {
     return 0U;
 }
 
+uint32_t pmm_alloc_frame_above(uint32_t min_addr) {
+    uint32_t start_frame;
+
+    if (free_frames == 0U) {
+        return 0U;
+    }
+
+    start_frame = min_addr / PMM_FRAME_SIZE;
+    if ((min_addr % PMM_FRAME_SIZE) != 0U) {
+        start_frame++;
+    }
+
+    if (start_frame >= total_frames) {
+        return 0U;
+    }
+
+    for (uint32_t frame = start_frame; frame < total_frames; ++frame) {
+        if (!test_bit(frame_bitmap, frame)) {
+            set_bit(frame_bitmap, frame);
+            clear_bit(table_frame_bitmap, frame);
+            free_frames--;
+            return frame * PMM_FRAME_SIZE;
+        }
+    }
+
+    return 0U;
+}
+
 void pmm_free_frame(uint32_t frame_addr) {
     uint32_t frame = frame_addr / PMM_FRAME_SIZE;
 
