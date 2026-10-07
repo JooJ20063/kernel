@@ -1,41 +1,50 @@
 # Roadmap
 
-## 0. Tree v2 e build
+## 0. Tree v2 e build — concluído
 
-- reorganizar a árvore por responsabilidade;
-- tornar o x86 o target suportado explícito;
-- isolar o x86-64 experimental;
-- separar UAPI de headers internos;
-- modularizar o build.
+- árvore organizada por responsabilidade;
+- x86 definido como target suportado;
+- x86-64 isolado como experimental;
+- UAPI separada de headers internos;
+- build modularizado.
 
-## 1. Ring 3 sólido
+## 1. Ring 3 sólido — concluído para o scaffolding atual
 
-- estabilizar mappings USER;
-- user stack;
+- mappings USER e user stack;
 - transições CPL3/CPL0;
 - preempção em Ring 3;
-- retorno correto de exceptions e syscalls;
-- adicionar `copy_from_user`, `copy_to_user` e validação de ponteiros.
+- retorno de exceptions e syscalls;
+- `copy_from_user`, `copy_to_user` e strings seguras;
+- faults recuperáveis de Ring 3 encerram apenas o processo culpado.
 
-## 2. Syscall ABI v0
+O próximo salto de Ring 3 depende do ELF loader e de address spaces privados.
 
-Expandir o conjunto inicial para aproximadamente 12–16 chamadas estáveis, incluindo I/O, filesystem, processo e memória.
+## 2. Syscall ABI v0 — 13 chamadas implementadas
 
-## 3. Processo e task
+```text
+write exit getpid yield getppid sleep wait
+open read close lseek fstat readdir
+```
 
-Separar o conceito de processo do contexto escalonável:
+Próximas candidatas antes da CLibC completa: `brk` e a chamada de criação/execução de processo que acompanhará o ELF loader.
 
-- processo: PID, address space, FD table e recursos;
-- task/thread: contexto de CPU, kernel stack, estado de scheduler e FPU.
+## 3. Processo e task — process model v1 concluído
 
-Inicialmente pode existir uma task por processo.
+Separação atual:
 
-## 4. Address spaces e file descriptors
+- `process_t`: PID, PPID, nome, exit status, CR3 e FD table;
+- `task_t`: TID, contexto de CPU, kernel stack, estado de scheduler e FPU;
+- relação atual: 1 processo : 1 task.
 
-- CR3 por processo;
-- userspace privado;
+## 4. Address spaces privados — próximo bloco
+
+- page directory/CR3 efetivamente privado por processo;
+- mapeamento compartilhado do kernel + mappings privados de userspace;
 - user stack por processo;
-- tabela de descritores.
+- ownership e destruição das páginas do processo;
+- preparação para `brk` e ELF.
+
+A FD table já pertence ao `process_t`.
 
 ## 5. ELF loader
 

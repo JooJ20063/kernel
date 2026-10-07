@@ -35,14 +35,19 @@ CZK_x86 currently includes support for:
 - VFS;
 - RAMFS;
 - preemptive scheduler;
+- separate process and task abstractions;
+- process-owned PID, parent PID, address-space handle and FD table;
 - task lifecycle management;
 - sleep and wait queues;
 - lazy FPU context management;
 - TSS;
 - system call interface through `int 0x80`;
+- safe userspace memory access through uaccess helpers;
+- Ring 3 fault isolation for recoverable CPU exceptions;
+- basic userspace file I/O through VFS/RAMFS;
 - Ring 0 diagnostic shell.
 
-**Ring 3** support is currently under development.
+**Ring 3** execution is functional for the current linked regression programs. External ELF userspace and private per-process address spaces are still under development.
 
 ---
 
@@ -500,20 +505,30 @@ The heap is used by several CZK subsystems, including tasks and internal kernel 
 
 ---
 
-## 17. Tasks
+## 17. Processes and Tasks
 
-CZK provides its own task abstraction.
+CZK now separates the **process** abstraction from the schedulable **task** abstraction.
 
-Each task stores information such as:
+A `process_t` owns process-wide resources:
 
-- PID;
-- name;
-- state;
-- stack;
-- execution context;
-- wake tick;
+- PID and parent PID;
+- process name;
+- exit status;
+- address-space handle (`cr3`);
+- file descriptor table.
+
+A `task_t` owns execution and scheduler state:
+
+- TID;
+- pointer to its owning process;
+- scheduler state;
+- saved CPU context;
+- wake tick and block reason;
+- kernel stack;
 - FPU state;
-- wait queue information.
+- wait queue linkage.
+
+The current process model is deliberately **1 process : 1 task**. This preserves the already-tested scheduler and Ring 3 behavior while establishing the ownership boundary needed for future multiple threads per process.
 
 Current task states include:
 
@@ -524,12 +539,7 @@ BLOCKED
 ZOMBIE
 ```
 
-Tasks may block for different reasons, including:
-
-```text
-sleep
-event
-```
+Tasks may block for sleep or event waits. Process resources remain associated with the process until its final task is reaped.
 
 ---
 
@@ -614,29 +624,29 @@ Wait queues are expected to become useful for:
 
 ---
 
-## 21. Task Lifecycle
+## 21. Process and Task Lifecycle
 
-Tasks have their own lifecycle.
+In process model v1, one task represents the execution context of one process.
 
-When a task terminates:
+When userspace exits or a recoverable Ring 3 exception terminates execution:
 
 ```text
-RUNNING
+RUNNING task
    ↓
-ZOMBIE
+process exit status recorded
    ↓
-reaper
+process FD table closed
    ↓
-resources released
+task becomes ZOMBIE
+   ↓
+wait/reaper
+   ↓
+task resources + process object released
 ```
 
-The reaper is responsible for releasing resources such as:
+Task-owned resources include the kernel stack and FPU storage. Process-owned resources include the FD table and the future address-space resources.
 
-- kernel stack;
-- FPU state;
-- task structure.
-
-This model will later support the evolution toward real processes and mechanisms similar to `wait()`.
+`wait()` operates on child process PIDs and retrieves the process exit status, even though the scheduler currently maintains the corresponding zombie through its single task.
 
 ---
 
@@ -664,44 +674,42 @@ This reduces unnecessary FPU context operations.
 
 ## 23. System Calls
 
-CZK currently provides an initial system call interface through:
+CZK exposes its current userspace ABI through:
 
 ```text
 int 0x80
 ```
 
-The gate uses DPL 3 to allow future calls originating from Ring 3.
-
-The initial ABI uses registers as follows:
+The ABI uses:
 
 ```text
-EAX — syscall number
+EAX — syscall number / return value
 EBX — arg1
 ECX — arg2
 EDX — arg3
 ```
 
-The return value also uses:
+Failures use negative public error numbers from `uapi/include/czk/errno.h`.
+
+The current ABI contains 13 calls:
 
 ```text
-EAX
+write
+exit
+getpid
+yield
+getppid
+sleep
+wait
+open
+read
+close
+lseek
+fstat
+readdir
 ```
 
-The complete path has already been validated through a test call:
-
-```text
-int 0x80
-   ↓
-IDT
-   ↓
-ISR
-   ↓
-syscall dispatcher
-   ↓
-return
-```
-
-The interface will expand as real processes and userspace support are implemented.
+Pointer arguments are validated through the uaccess layer rather than dereferenced directly by syscall handlers. File operations use the FD table owned by the current process.
 
 ---
 
@@ -841,53 +849,51 @@ Native UEFI boot is not yet supported.
 
 ## 30. Ring 3
 
-Ring 3 support is currently under development.
+The current linked Ring 3 regression environment is operational.
 
-The project already includes:
+Validated capabilities include:
 
-- user code segments;
-- user data segments;
-- TSS;
-- DPL 3 system call gate;
-- USER flag in the VMM;
-- sections reserved for userspace code and data.
+- CPL3/CPL0 transitions through the TSS;
+- user code, data and stack mappings;
+- preemption while executing Ring 3 code;
+- system calls through `int 0x80`;
+- `copy_from_user()`, `copy_to_user()` and bounded userspace string copies;
+- rejection of kernel-only pointers supplied by userspace;
+- typed syscall errors;
+- per-process standard file descriptors;
+- RAMFS file create/open/read/write/close;
+- `lseek`, `fstat` and `readdir`;
+- recoverable Ring 3 page faults, invalid opcodes and general-protection faults terminating only the offending task/process.
 
-The next steps include:
+Ring 0 faults remain kernel-fatal.
 
-```text
-USER page mappings
-   ↓
-user stack
-   ↓
-iret to CPL3
-   ↓
-first Ring 3 code
-   ↓
-userspace syscall
-   ↓
-preemption
-   ↓
-correct return to Ring 3
-```
+The major remaining step is to stop linking test userspace into the kernel image and instead load external ELF executables into private process address spaces.
 
 ---
 
-## 31. Processes — Near-Term Roadmap
+## 31. Process Model v1
 
-After Ring 3 becomes stable, the architecture is expected to evolve from internal tasks toward complete processes.
+The first process/task separation is implemented.
 
-Planned goals include:
+Current ownership is:
 
 ```text
-process address spaces
-FD tables
-process lifecycle
-fork-like process creation
-exec
-wait
+process_t
+├── PID / PPID
+├── name and exit status
+├── CR3 / address-space handle
+└── FD table
+
+task_t
+├── TID
+├── process_t *
+├── CPU context
+├── kernel stack
+├── scheduler state
+└── FPU state
 ```
 
-Each process is expected to have its own virtual memory context and associated resources.
+For now, every process has exactly one task and all processes still use the shared kernel page-table context. The next process milestone is private address spaces and user stacks per process. Multiple tasks/threads inside one process can be added later without moving process-wide resources again.
 
 ---
 

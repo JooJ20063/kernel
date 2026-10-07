@@ -15,7 +15,7 @@
 static uint32_t quantum = 10; // Default quantum in ticks
 static uint32_t tick_acc = 0;
 static uint32_t switches = 0;
-static uint32_t next_pid = 1; // Start PID from 1
+static uint32_t next_tid = 1U;
 static uint32_t task_count = 0;
 static uint32_t last_exit_pid = 0;
 static uint32_t last_exit_code = 0;
@@ -23,6 +23,7 @@ static uint32_t last_exit_code = 0;
 static uint8_t demo_started = 0;
 
 static task_t idle_task;
+static process_t idle_process;
 static task_t *current = 0;
 static task_t *task_list = 0;
 
@@ -162,25 +163,25 @@ void sched_init(uint32_t quantum_ticks) {
 
     tick_acc = 0;
     switches = 0;
-    next_pid = 1;
+    next_tid = 1U;
     task_count = 0;
     task_list = 0;
 
+    process_system_init();
+    process_init_bootstrap(&idle_process, "idle");
+
     mem_zero(&idle_task, sizeof(idle_task));
 
-    idle_task.pid = 0;
-    idle_task.parent_pid = 0;
+    idle_task.tid = 0U;
+    idle_task.process = &idle_process;
     idle_task.state = TASK_RUNNING;
-    idle_task.name = "idle";
     idle_task.context = 0;
     idle_task.kernel_stack = 0;
     idle_task.kernel_stack_size = 0;
     idle_task.next = 0;
-    idle_task.cr3 = 0;
     idle_task.fpu_storage = 0;
     idle_task.fpu_area = 0;
     idle_task.fpu_initialized = 0;
-    fd_table_init(&idle_task.fds);
 
     add_task(&idle_task);
 
@@ -361,7 +362,7 @@ static task_t *find_task_by_pid(uint32_t pid) {
     task_t *t = task_list;
 
     do {
-        if (t->pid == pid) {
+        if (t->process != 0 && t->process->pid == pid) {
             return t;
         }
 
@@ -376,19 +377,20 @@ int32_t task_wait_child(int32_t *status) {
         return -1;
     }
 
-    uint32_t parent_pid = current->pid;
+    uint32_t parent_pid = current->process->pid;
 
     task_t *prev = task_list;
     task_t *t = task_list->next;
 
     do {
-        if (t->parent_pid == parent_pid &&
+        if (t->process != 0 &&
+            t->process->parent_pid == parent_pid &&
             t->state == TASK_ZOMBIE &&
             t != &idle_task &&
             t != current) {
 
-            uint32_t pid = t->pid;
-            int32_t code = t->exit_code;
+            uint32_t pid = t->process->pid;
+            int32_t code = t->process->exit_code;
 
             prev->next = t->next;
 
@@ -407,6 +409,7 @@ int32_t task_wait_child(int32_t *status) {
                 kfree(t->kernel_stack);
             }
 
+            process_destroy(t->process);
             kfree(t);
 
             if (task_count > 0) {
@@ -434,7 +437,9 @@ static void reap_zombies(void) {
 
 
     do {
-        task_t *parent = find_task_by_pid(t->parent_pid);
+        uint32_t parent_pid =
+            (t->process != 0) ? t->process->parent_pid : 0U;
+        task_t *parent = find_task_by_pid(parent_pid);
 
         if (t->state == TASK_ZOMBIE &&
             t != current &&
@@ -447,8 +452,10 @@ static void reap_zombies(void) {
             task_t *dead = t;
             t = t->next;
 
-            last_exit_pid = dead->pid;
-            last_exit_code = dead->exit_code;
+            last_exit_pid =
+                (dead->process != 0) ? dead->process->pid : 0U;
+            last_exit_code =
+                (dead->process != 0) ? dead->process->exit_code : 0;
 
             if (dead->fpu_storage != 0) {
                 kfree(dead->fpu_storage);
@@ -458,6 +465,7 @@ static void reap_zombies(void) {
                 kfree(dead->kernel_stack);
             }
 
+            process_destroy(dead->process);
             kfree(dead);
 
             if (task_count > 0) {
@@ -542,61 +550,75 @@ registers_t *sched_yield_irq(registers_t *regs) {
 }
 
 uint32_t sched_current_ppid(void){
-    if (current == 0) {
+    if (current == 0 || current->process == 0) {
         return 0;
     }
-    return current->parent_pid;
+    return current->process->parent_pid;
 }
 
 int sched_create_kernel_task(const char *name, void (*entry)(void)) {
+    task_t *task;
+    uint8_t *stack;
+    registers_t *frame;
+    process_t *process;
+    uint32_t parent_pid;
+    uintptr_t top;
+
     if (entry == 0) {
         return -1;
     }
 
-    task_t *task = (task_t *)kmalloc(sizeof(task_t));
-
+    task = (task_t *)kmalloc(sizeof(task_t));
     if (task == 0) {
         return -2;
     }
-    
-    uint8_t *stack = (uint8_t *)kmalloc(KERNEL_STACK_SIZE);
 
+    stack = (uint8_t *)kmalloc(KERNEL_STACK_SIZE);
     if (stack == 0) {
+        kfree(task);
         return -3;
+    }
+
+    parent_pid =
+        (current != 0 && current->process != 0)
+            ? current->process->pid
+            : 0U;
+
+    process = process_create(name, parent_pid, 0U);
+    if (process == 0) {
+        kfree(stack);
+        kfree(task);
+        return -4;
     }
 
     mem_zero(task, sizeof(task_t));
     mem_zero(stack, KERNEL_STACK_SIZE);
 
-    uintptr_t top = (uintptr_t)stack + KERNEL_STACK_SIZE;
+    top = (uintptr_t)stack + KERNEL_STACK_SIZE;
     top -= sizeof(registers_t);
 
-    registers_t *frame = (registers_t *)top;
+    frame = (registers_t *)top;
     mem_zero(frame, sizeof(registers_t));
 
     frame->gs = KERNEL_DS;
     frame->fs = KERNEL_DS;
     frame->es = KERNEL_DS;
     frame->ds = KERNEL_DS;
-
     frame->eip = (uint32_t)(uintptr_t)entry;
     frame->cs = KERNEL_CS;
     frame->eflags = EFLAGS_IF;
 
-    task->pid = next_pid++;
-    task->parent_pid = (current != 0) ? current->pid : 0;
-    task->name = name;
+    task->tid = next_tid++;
+    task->process = process;
     task->state = TASK_READY;
     task->context = frame;
     task->kernel_stack = stack;
     task->kernel_stack_size = KERNEL_STACK_SIZE;
-    add_task(task);
 
-    task->cr3 = 0;
-    fd_table_init(&task->fds);
+    add_task(task);
     fpu_init_task(task);
 
-    return (int)task->pid;
+    return (int)process->pid;
 }
 
 int sched_create_user_task(
@@ -604,77 +626,70 @@ int sched_create_user_task(
     void (*entry)(void),
     uintptr_t user_stack_top
 ) {
+    task_t *task;
+    uint8_t *stack;
+    registers_t *frame;
+    process_t *process;
+    uint32_t parent_pid;
+    uintptr_t top;
+
     if (entry == 0 || user_stack_top == 0U) {
         return -1;
     }
 
-    task_t *task = (task_t *)kmalloc(sizeof(task_t));
+    task = (task_t *)kmalloc(sizeof(task_t));
     if (task == 0) {
         return -2;
     }
 
-    uint8_t *stack = (uint8_t *)kmalloc(KERNEL_STACK_SIZE);
+    stack = (uint8_t *)kmalloc(KERNEL_STACK_SIZE);
     if (stack == 0) {
         kfree(task);
         return -3;
     }
 
+    parent_pid =
+        (current != 0 && current->process != 0)
+            ? current->process->pid
+            : 0U;
+
+    process = process_create(name, parent_pid, 0U);
+    if (process == 0) {
+        kfree(stack);
+        kfree(task);
+        return -4;
+    }
+
     mem_zero(task, sizeof(task_t));
     mem_zero(stack, KERNEL_STACK_SIZE);
 
-    uintptr_t top = (uintptr_t)stack + KERNEL_STACK_SIZE;
+    top = (uintptr_t)stack + KERNEL_STACK_SIZE;
     top -= sizeof(registers_t);
 
-    registers_t *frame = (registers_t *)top;
+    frame = (registers_t *)top;
     mem_zero(frame, sizeof(registers_t));
 
-    /*
-     * Segmentos restaurados pelo irq_common_stub antes do iret.
-     * Precisam ser seletores DPL3.
-     */
     frame->gs = USER_DS;
     frame->fs = USER_DS;
     frame->es = USER_DS;
     frame->ds = USER_DS;
-
-    /*
-     * Estado inicial em CPL3.
-     */
     frame->eip = (uint32_t)(uintptr_t)entry;
     frame->cs = USER_CS;
     frame->eflags = EFLAGS_IF;
-
-    /*
-     * Como o iret troca CPL0 -> CPL3, ele também consome
-     * ESP e SS de usuário.
-     */
     frame->useresp = (uint32_t)user_stack_top;
     frame->ss = USER_DS;
 
-    task->pid = next_pid++;
-    task->parent_pid = (current != 0) ? current->pid : 0;
-    task->name = name;
+    task->tid = next_tid++;
+    task->process = process;
     task->state = TASK_READY;
     task->context = frame;
-
-    /*
-     * Esta é a kernel stack usada quando uma IRQ/syscall
-     * entra no kernel a partir dessa user task.
-     */
     task->kernel_stack = stack;
     task->kernel_stack_size = KERNEL_STACK_SIZE;
 
-    /*
-     * Por enquanto user/kernel compartilham o mesmo CR3.
-     * Depois criaremos address spaces por processo.
-     */
-    task->cr3 = 0;
-
-    fd_table_init(&task->fds);
     add_task(task);
     fpu_init_task(task);
 
-    return (int)task->pid;
+    return (int)process->pid;
 }
 
 static void demo_task_a(void) {
@@ -817,7 +832,7 @@ uint32_t sched_current_task(void) {
     if (current == 0) {
         return 0;
     }
-    return current->pid;
+    return current->tid;
 }
 
 uint32_t sched_exit_task_run(void) {
@@ -829,10 +844,10 @@ uint32_t sched_sleep_demo_counter(void) {
 }
 
 uint32_t sched_current_pid(void) {
-    if (current == 0) {
+    if (current == 0 || current->process == 0) {
         return 0;
     }
-    return current->pid;
+    return current->process->pid;
 }
 
 uint32_t sched_switch_count(void) {
@@ -849,27 +864,29 @@ void task_list_tasks(void) {
         return;
     }
 
-    vga_puts("PID   PPID   Name          State     Stack\n");
-    vga_puts("-------------------------------------------------\n");
-    
+    vga_puts("TID   PID   PPID   Name          State     Stack\n");
+    vga_puts("-------------------------------------------------------\n");
+
     task_t *t = task_list;
 
     do {
-        vga_putdec(t->pid);
+        process_t *process = t->process;
+
+        vga_putdec(t->tid);
         vga_puts("   ");
-        vga_putdec(t->parent_pid);
+        vga_putdec(process != 0 ? process->pid : 0U);
+        vga_puts("   ");
+        vga_putdec(process != 0 ? process->parent_pid : 0U);
         vga_puts("   ");
 
-
-        if (t->name != 0) {
-            vga_puts(t->name);
+        if (process != 0 && process->name != 0) {
+            vga_puts(process->name);
         } else {
             vga_puts("unnamed");
         }
 
         vga_puts("   ");
         vga_puts(state_name(t->state));
-
         vga_puts("   ");
 
         if (t->kernel_stack != 0) {
@@ -894,8 +911,7 @@ void task_yield(void) {
 
 void task_exit_code(int32_t code) {
     if (current != 0) {
-        current->exit_code = code;
-        fd_table_close_all(&current->fds);
+        process_mark_exit(current->process, code);
         current->block_reason = TASK_BLOCK_NONE;
         current->wake_tick = 0;
         current->state = TASK_ZOMBIE;
@@ -916,8 +932,7 @@ registers_t *task_exit_from_exception(registers_t *regs, int32_t exit_code) {
     }
 
     current->context = regs;
-    current->exit_code = exit_code;
-    fd_table_close_all(&current->fds);
+    process_mark_exit(current->process, exit_code);
     current->block_reason = TASK_BLOCK_NONE;
     current->wake_tick = 0;
     current->state = TASK_ZOMBIE;
@@ -927,6 +942,14 @@ registers_t *task_exit_from_exception(registers_t *regs, int32_t exit_code) {
 
 task_t *sched_current_task_ptr(void) {
     return current;
+}
+
+process_t *sched_current_process_ptr(void) {
+    if (current == 0) {
+        return 0;
+    }
+
+    return current->process;
 }
 
 uint32_t sched_sse_value_a(void) {

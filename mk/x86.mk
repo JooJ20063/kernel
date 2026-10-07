@@ -21,6 +21,7 @@ C_SRCS := \
 	kernel/fs/vfs.c \
 	kernel/fs/fd.c \
 	kernel/fs/ramfs.c \
+	kernel/sched/process.c \
 	kernel/sched/task.c \
 	kernel/debug/shell.c \
 	kernel/syscall/syscall.c \
