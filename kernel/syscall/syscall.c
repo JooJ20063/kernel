@@ -12,23 +12,25 @@
 #include <czk/seek.h>
 #include <czk/stat.h>
 #include <czk/dirent.h>
+#include <czk/abi.h>
+#include <czk/fs.h>
 
 static uint32_t syscall_error(uint32_t error_number) {
     return (uint32_t)(-(int32_t)error_number);
 }
 
 typedef struct execve_copy {
-    const char *argv[ELF32_EXEC_MAX_ARGS];
-    const char *envp[ELF32_EXEC_MAX_ENVS];
-    char argv_storage[ELF32_EXEC_MAX_ARGS][ELF32_EXEC_MAX_STRING];
-    char envp_storage[ELF32_EXEC_MAX_ENVS][ELF32_EXEC_MAX_STRING];
+    const char *argv[CZK_EXEC_MAX_ARGS];
+    const char *envp[CZK_EXEC_MAX_ENVS];
+    char argv_storage[CZK_EXEC_MAX_ARGS][CZK_EXEC_MAX_STRING];
+    char envp_storage[CZK_EXEC_MAX_ENVS][CZK_EXEC_MAX_STRING];
     uint32_t argc;
     uint32_t envc;
 } execve_copy_t;
 
 static int syscall_copy_string_vector(
     uintptr_t user_vector,
-    char storage[][ELF32_EXEC_MAX_STRING],
+    char storage[][CZK_EXEC_MAX_STRING],
     const char **kernel_vector,
     uint32_t max_count,
     uint32_t *count_out
@@ -65,7 +67,7 @@ static int syscall_copy_string_vector(
         copy_result = copy_string_from_user(
             storage[i],
             (const char *)(uintptr_t)user_string,
-            ELF32_EXEC_MAX_STRING
+            CZK_EXEC_MAX_STRING
         );
 
         if (copy_result == -1) {
@@ -98,6 +100,28 @@ static uint32_t syscall_execve_error(int elf_status) {
     }
 }
 
+static uint32_t syscall_uapi_fs_flags(uint32_t kernel_flags) {
+    uint32_t uapi_flags = 0U;
+
+    if ((kernel_flags & FS_FILE) != 0U) {
+        uapi_flags |= CZK_FS_FILE;
+    }
+
+    if ((kernel_flags & FS_DIRECTORY) != 0U) {
+        uapi_flags |= CZK_FS_DIRECTORY;
+    }
+
+    if ((kernel_flags & FS_WRITABLE) != 0U) {
+        uapi_flags |= CZK_FS_WRITABLE;
+    }
+
+    if ((kernel_flags & FS_SEEKABLE) != 0U) {
+        uapi_flags |= CZK_FS_SEEKABLE;
+    }
+
+    return uapi_flags;
+}
+
 static void syscall_dirent_from_node(
     czk_dirent_t *dirent,
     const fs_node_t *node
@@ -116,7 +140,7 @@ static void syscall_dirent_from_node(
     }
 
     dirent->d_name[i] = 0;
-    dirent->d_flags = node->flags;
+    dirent->d_flags = syscall_uapi_fs_flags(node->flags);
     dirent->d_size = node->size;
 }
 
@@ -168,6 +192,11 @@ registers_t *syscall_handler(registers_t *regs) {
 
             if (process == 0 || !fd_is_writable(&process->fds, fd)) {
                 regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            if (len > (uint32_t)CZK_SSIZE_MAX) {
+                regs->eax = syscall_error(CZK_EOVERFLOW);
                 break;
             }
 
@@ -228,6 +257,7 @@ registers_t *syscall_handler(registers_t *regs) {
         break;
 
         case SYS_YIELD:
+            regs->eax = 0U;
             return sched_yield_irq(regs);
 
         
@@ -260,7 +290,7 @@ registers_t *syscall_handler(registers_t *regs) {
                 break;
             }
 
-            pid = task_wait_child(&status);
+            pid = task_wait_child_blocking(&status);
             if (pid < 0) {
                 regs->eax = syscall_error(CZK_ECHILD);
                 break;
@@ -281,7 +311,7 @@ registers_t *syscall_handler(registers_t *regs) {
                 (const char *)(uintptr_t)regs->ebx;
             uint32_t flags = regs->ecx;
             uint32_t access;
-            char path[128];
+            char path[CZK_PATH_MAX];
             int copy_result;
             fs_node_t *node;
             int32_t fd;
@@ -362,6 +392,11 @@ registers_t *syscall_handler(registers_t *regs) {
 
             if (process == 0 || !fd_is_readable(&process->fds, fd)) {
                 regs->eax = syscall_error(CZK_EBADF);
+                break;
+            }
+
+            if (len > (uint32_t)CZK_SSIZE_MAX) {
+                regs->eax = syscall_error(CZK_EOVERFLOW);
                 break;
             }
 
@@ -462,6 +497,11 @@ registers_t *syscall_handler(registers_t *regs) {
                 break;
             }
 
+            if (result == -4) {
+                regs->eax = syscall_error(CZK_EOVERFLOW);
+                break;
+            }
+
             regs->eax = new_offset;
             break;
         }
@@ -473,14 +513,21 @@ registers_t *syscall_handler(registers_t *regs) {
             czk_stat_t stat;
             process_t *process = sched_current_process_ptr();
 
-            if (process == 0 ||
-                fd_stat(
-                    &process->fds,
-                    fd,
-                    &stat.st_size,
-                    &stat.st_flags) != 0) {
-                regs->eax = syscall_error(CZK_EBADF);
-                break;
+            {
+                uint32_t kernel_flags = 0U;
+
+                if (process == 0 ||
+                    fd_stat(
+                        &process->fds,
+                        fd,
+                        &stat.st_size,
+                        &kernel_flags) != 0) {
+                    regs->eax = syscall_error(CZK_EBADF);
+                    break;
+                }
+
+                stat.st_flags =
+                    syscall_uapi_fs_flags(kernel_flags);
             }
 
             if (copy_to_user(user_stat, &stat, sizeof(stat)) != 0) {
@@ -497,7 +544,7 @@ registers_t *syscall_handler(registers_t *regs) {
                 (const char *)(uintptr_t)regs->ebx;
             uintptr_t user_argv = (uintptr_t)regs->ecx;
             uintptr_t user_envp = (uintptr_t)regs->edx;
-            char path[128];
+            char path[CZK_PATH_MAX];
             fs_node_t *node;
             execve_copy_t *copy;
             int copy_result;
@@ -546,7 +593,7 @@ registers_t *syscall_handler(registers_t *regs) {
                 user_argv,
                 copy->argv_storage,
                 copy->argv,
-                ELF32_EXEC_MAX_ARGS,
+                CZK_EXEC_MAX_ARGS,
                 &copy->argc
             );
 
@@ -555,7 +602,7 @@ registers_t *syscall_handler(registers_t *regs) {
                     user_envp,
                     copy->envp_storage,
                     copy->envp,
-                    ELF32_EXEC_MAX_ENVS,
+                    CZK_EXEC_MAX_ENVS,
                     &copy->envc
                 );
             }
@@ -642,6 +689,10 @@ registers_t *syscall_handler(registers_t *regs) {
             regs->eax = 1U;
             break;
         }
+
+        case SYS_ABI_VERSION:
+            regs->eax = CZK_ABI_VERSION_CURRENT;
+            break;
 
         default:
             regs->eax = syscall_error(CZK_ENOSYS);
