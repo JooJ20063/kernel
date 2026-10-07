@@ -180,6 +180,7 @@ void sched_init(uint32_t quantum_ticks) {
     idle_task.fpu_storage = 0;
     idle_task.fpu_area = 0;
     idle_task.fpu_initialized = 0;
+    fd_table_init(&idle_task.fds);
 
     add_task(&idle_task);
 
@@ -592,6 +593,7 @@ int sched_create_kernel_task(const char *name, void (*entry)(void)) {
     add_task(task);
 
     task->cr3 = 0;
+    fd_table_init(&task->fds);
     fpu_init_task(task);
 
     return (int)task->pid;
@@ -668,6 +670,7 @@ int sched_create_user_task(
      */
     task->cr3 = 0;
 
+    fd_table_init(&task->fds);
     add_task(task);
     fpu_init_task(task);
 
