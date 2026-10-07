@@ -1,4 +1,6 @@
 #include <kernel/elf32.h>
+#include <kernel/pmm.h>
+#include <kernel/vmm.h>
 
 #define ELF32_ADDR_MAX 0xFFFFFFFFU
 
@@ -78,6 +80,275 @@ static int elf32_validate_load_segment(
 
     if (segment_end_out != 0) {
         *segment_end_out = segment_end;
+    }
+
+    return ELF32_OK;
+}
+
+static uint32_t elf32_min_u32(uint32_t a, uint32_t b) {
+    return (a < b) ? a : b;
+}
+
+static int elf32_validate_user_load_range(
+    const elf32_phdr_t *program_header,
+    uint32_t *page_start_out,
+    uint32_t *page_end_out
+) {
+    uint32_t segment_end;
+    uint32_t page_start;
+    uint32_t page_end;
+
+    if (program_header == 0) {
+        return ELF32_ERR_ARGUMENT;
+    }
+
+    if (program_header->p_memsz == 0U) {
+        if (page_start_out != 0) {
+            *page_start_out = 0U;
+        }
+        if (page_end_out != 0) {
+            *page_end_out = 0U;
+        }
+        return ELF32_OK;
+    }
+
+    segment_end =
+        program_header->p_vaddr + program_header->p_memsz;
+
+    if (program_header->p_vaddr < VMM_USER_MIN_ADDR ||
+        segment_end > VMM_USER_MAX_ADDR) {
+        return ELF32_ERR_SEGMENT_USER_RANGE;
+    }
+
+    page_start =
+        program_header->p_vaddr &
+        ~(uint32_t)(VMM_PAGE_SIZE - 1U);
+
+    page_end =
+        (segment_end + VMM_PAGE_SIZE - 1U) &
+        ~(uint32_t)(VMM_PAGE_SIZE - 1U);
+
+    if (page_start < VMM_USER_MIN_ADDR ||
+        page_end > VMM_USER_MAX_ADDR ||
+        page_start >= page_end) {
+        return ELF32_ERR_SEGMENT_USER_RANGE;
+    }
+
+    if (page_start_out != 0) {
+        *page_start_out = page_start;
+    }
+
+    if (page_end_out != 0) {
+        *page_end_out = page_end;
+    }
+
+    return ELF32_OK;
+}
+
+static int elf32_map_load_segment_pages(
+    uint32_t cr3,
+    const elf32_phdr_t *program_header,
+    uint32_t *mapped_page_count
+) {
+    uint32_t page_start;
+    uint32_t page_end;
+    uint32_t map_flags;
+    int status;
+
+    status = elf32_validate_user_load_range(
+        program_header,
+        &page_start,
+        &page_end
+    );
+    if (status != ELF32_OK) {
+        return status;
+    }
+
+    if (program_header->p_memsz == 0U) {
+        return ELF32_OK;
+    }
+
+    map_flags =
+        ((program_header->p_flags & ELF32_PF_W) != 0U)
+            ? VMM_PAGE_RW
+            : 0U;
+
+    for (uint32_t addr = page_start;
+         addr < page_end;
+         addr += VMM_PAGE_SIZE) {
+        uintptr_t existing =
+            vmm_translate_address_space(cr3, addr);
+
+        if (existing == 0U) {
+            uint32_t frame = pmm_alloc_frame();
+
+            if (frame == 0U) {
+                return ELF32_ERR_NO_MEMORY;
+            }
+
+            if (vmm_zero_phys(frame, VMM_PAGE_SIZE) != 0) {
+                pmm_free_frame(frame);
+                return ELF32_ERR_SEGMENT_ZERO;
+            }
+
+            if (vmm_map_user_page(
+                    cr3,
+                    addr,
+                    frame,
+                    map_flags) != 0) {
+                pmm_free_frame(frame);
+                return ELF32_ERR_MAP_FAILED;
+            }
+
+            if (mapped_page_count != 0) {
+                (*mapped_page_count)++;
+            }
+        } else {
+            uint32_t current_flags = 0U;
+
+            if (vmm_get_page_flags_address_space(
+                    cr3,
+                    addr,
+                    &current_flags) != 0) {
+                return ELF32_ERR_PAGE_FLAGS;
+            }
+
+            if ((current_flags & VMM_PAGE_USER) == 0U) {
+                return ELF32_ERR_ADDRESS_CONFLICT;
+            }
+
+            if ((map_flags & VMM_PAGE_RW) != 0U &&
+                (current_flags & VMM_PAGE_RW) == 0U) {
+                if (vmm_set_user_page_flags(
+                        cr3,
+                        addr,
+                        VMM_PAGE_RW) != 0) {
+                    return ELF32_ERR_PAGE_FLAGS;
+                }
+            }
+        }
+    }
+
+    return ELF32_OK;
+}
+
+static int elf32_copy_virtual_range(
+    fs_node_t *node,
+    uint32_t cr3,
+    uint32_t file_offset,
+    uint32_t virt_addr,
+    uint32_t size
+) {
+    uint8_t scratch[256];
+    uint32_t remaining = size;
+    uint32_t source_offset = file_offset;
+    uint32_t target = virt_addr;
+
+    while (remaining != 0U) {
+        uint32_t page_remaining =
+            VMM_PAGE_SIZE -
+            (target & (VMM_PAGE_SIZE - 1U));
+        uint32_t chunk =
+            elf32_min_u32(
+                remaining,
+                elf32_min_u32(
+                    page_remaining,
+                    (uint32_t)sizeof(scratch)
+                )
+            );
+        uintptr_t phys =
+            vmm_translate_address_space(cr3, target);
+
+        if (phys == 0U) {
+            return ELF32_ERR_MAP_FAILED;
+        }
+
+        if (read_fs(
+                node,
+                source_offset,
+                chunk,
+                scratch) != chunk) {
+            return ELF32_ERR_SEGMENT_READ;
+        }
+
+        if (vmm_copy_to_phys(
+                phys,
+                scratch,
+                chunk) != 0) {
+            return ELF32_ERR_SEGMENT_COPY;
+        }
+
+        source_offset += chunk;
+        target += chunk;
+        remaining -= chunk;
+    }
+
+    return ELF32_OK;
+}
+
+static int elf32_zero_virtual_range(
+    uint32_t cr3,
+    uint32_t virt_addr,
+    uint32_t size
+) {
+    uint32_t remaining = size;
+    uint32_t target = virt_addr;
+
+    while (remaining != 0U) {
+        uint32_t page_remaining =
+            VMM_PAGE_SIZE -
+            (target & (VMM_PAGE_SIZE - 1U));
+        uint32_t chunk =
+            elf32_min_u32(remaining, page_remaining);
+        uintptr_t phys =
+            vmm_translate_address_space(cr3, target);
+
+        if (phys == 0U) {
+            return ELF32_ERR_MAP_FAILED;
+        }
+
+        if (vmm_zero_phys(phys, chunk) != 0) {
+            return ELF32_ERR_SEGMENT_ZERO;
+        }
+
+        target += chunk;
+        remaining -= chunk;
+    }
+
+    return ELF32_OK;
+}
+
+static int elf32_populate_load_segment(
+    fs_node_t *node,
+    uint32_t cr3,
+    const elf32_phdr_t *program_header
+) {
+    int status;
+
+    if (program_header->p_filesz != 0U) {
+        status = elf32_copy_virtual_range(
+            node,
+            cr3,
+            program_header->p_offset,
+            program_header->p_vaddr,
+            program_header->p_filesz
+        );
+        if (status != ELF32_OK) {
+            return status;
+        }
+    }
+
+    if (program_header->p_memsz > program_header->p_filesz) {
+        status = elf32_zero_virtual_range(
+            cr3,
+            program_header->p_vaddr +
+                program_header->p_filesz,
+            program_header->p_memsz -
+                program_header->p_filesz
+        );
+        if (status != ELF32_OK) {
+            return status;
+        }
     }
 
     return ELF32_OK;
@@ -355,6 +626,150 @@ int elf32_inspect(
     );
 }
 
+int elf32_load_image(
+    fs_node_t *node,
+    elf32_loaded_image_t *loaded_out
+) {
+    elf32_ehdr_t header;
+    elf32_image_info_t image;
+    elf32_loaded_image_t loaded;
+    int status;
+
+    if (node == 0 || loaded_out == 0) {
+        return ELF32_ERR_ARGUMENT;
+    }
+
+    status = elf32_inspect(node, &header, &image);
+    if (status != ELF32_OK) {
+        return status;
+    }
+
+    for (uint32_t i = 0U;
+         i < (uint32_t)header.e_phnum;
+         ++i) {
+        elf32_phdr_t program_header;
+
+        status = elf32_read_program_header_unchecked(
+            node,
+            &header,
+            i,
+            &program_header
+        );
+        if (status != ELF32_OK) {
+            return status;
+        }
+
+        if (program_header.p_type != ELF32_PT_LOAD ||
+            program_header.p_memsz == 0U) {
+            continue;
+        }
+
+        status = elf32_validate_user_load_range(
+            &program_header,
+            0,
+            0
+        );
+        if (status != ELF32_OK) {
+            return status;
+        }
+    }
+
+    loaded.cr3 = vmm_create_address_space();
+    if (loaded.cr3 == 0U) {
+        return ELF32_ERR_NO_MEMORY;
+    }
+
+    loaded.entry = image.entry;
+    loaded.lowest_vaddr = image.lowest_vaddr;
+    loaded.highest_vaddr = image.highest_vaddr;
+    loaded.load_segment_count = image.load_segment_count;
+    loaded.mapped_page_count = 0U;
+
+    for (uint32_t i = 0U;
+         i < (uint32_t)header.e_phnum;
+         ++i) {
+        elf32_phdr_t program_header;
+
+        status = elf32_read_program_header_unchecked(
+            node,
+            &header,
+            i,
+            &program_header
+        );
+        if (status != ELF32_OK) {
+            goto fail;
+        }
+
+        if (program_header.p_type != ELF32_PT_LOAD ||
+            program_header.p_memsz == 0U) {
+            continue;
+        }
+
+        status = elf32_map_load_segment_pages(
+            loaded.cr3,
+            &program_header,
+            &loaded.mapped_page_count
+        );
+        if (status != ELF32_OK) {
+            goto fail;
+        }
+    }
+
+    for (uint32_t i = 0U;
+         i < (uint32_t)header.e_phnum;
+         ++i) {
+        elf32_phdr_t program_header;
+
+        status = elf32_read_program_header_unchecked(
+            node,
+            &header,
+            i,
+            &program_header
+        );
+        if (status != ELF32_OK) {
+            goto fail;
+        }
+
+        if (program_header.p_type != ELF32_PT_LOAD ||
+            program_header.p_memsz == 0U) {
+            continue;
+        }
+
+        status = elf32_populate_load_segment(
+            node,
+            loaded.cr3,
+            &program_header
+        );
+        if (status != ELF32_OK) {
+            goto fail;
+        }
+    }
+
+    *loaded_out = loaded;
+    return ELF32_OK;
+
+fail:
+    vmm_destroy_address_space(loaded.cr3);
+    return status;
+}
+
+void elf32_unload_image(elf32_loaded_image_t *loaded) {
+    if (loaded == 0) {
+        return;
+    }
+
+    if (loaded->cr3 != 0U) {
+        vmm_destroy_address_space(loaded->cr3);
+    }
+
+    loaded->cr3 = 0U;
+    loaded->entry = 0U;
+    loaded->lowest_vaddr = 0U;
+    loaded->highest_vaddr = 0U;
+    loaded->load_segment_count = 0U;
+    loaded->mapped_page_count = 0U;
+}
+
 const char *elf32_status_string(int status) {
     switch (status) {
         case ELF32_OK:
@@ -409,6 +824,22 @@ const char *elf32_status_string(int status) {
             return "dynamic ELF unsupported";
         case ELF32_ERR_ENTRY_NOT_EXECUTABLE:
             return "entry point is outside executable load segments";
+        case ELF32_ERR_SEGMENT_USER_RANGE:
+            return "load segment outside userspace range";
+        case ELF32_ERR_ADDRESS_CONFLICT:
+            return "load segment conflicts with existing mapping";
+        case ELF32_ERR_NO_MEMORY:
+            return "out of memory while loading ELF";
+        case ELF32_ERR_MAP_FAILED:
+            return "failed to map ELF page";
+        case ELF32_ERR_SEGMENT_READ:
+            return "failed to read ELF segment";
+        case ELF32_ERR_SEGMENT_COPY:
+            return "failed to copy ELF segment";
+        case ELF32_ERR_SEGMENT_ZERO:
+            return "failed to zero ELF memory";
+        case ELF32_ERR_PAGE_FLAGS:
+            return "failed to inspect or update ELF page flags";
         default:
             return "unknown ELF error";
     }
