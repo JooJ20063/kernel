@@ -195,7 +195,7 @@ A new userspace process begins with:
 | 1 | stdout, writable |
 | 2 | stderr, writable |
 
-The current descriptor-table capacity is frozen as `CZK_OPEN_MAX` entries for ABI v1.
+ABI v1.0 currently supports `CZK_OPEN_MAX` descriptor slots. A compatible v1.x kernel may raise this resource limit, but must never reduce the v1.0 guarantee for existing binaries.
 
 Ordinary `open` allocations use descriptors at or above 3. Programs must not assume a particular descriptor number beyond the standard descriptors.
 
@@ -315,6 +315,7 @@ Compatible v1.x additions may include:
 - new errno values;
 - new open/feature flag bits where old kernels already reject unknown bits;
 - new standalone public structures;
+- monotonic increases to non-layout resource limits such as path length, open-descriptor count, or exec argument counts;
 - optional startup data after the envp NULL terminator;
 - new executable capabilities that do not invalidate existing static ELF32 binaries.
 
