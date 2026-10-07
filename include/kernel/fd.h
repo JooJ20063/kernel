@@ -38,5 +38,7 @@ int32_t fd_open_vfs(fd_table_t *table, fs_node_t *node, uint32_t access);
 int32_t fd_close(fd_table_t *table, uint32_t fd);
 int32_t fd_read(fd_table_t *table, uint32_t fd, uint8_t *buffer, uint32_t size);
 int32_t fd_write(fd_table_t *table, uint32_t fd, const uint8_t *buffer, uint32_t size);
+int32_t fd_seek(fd_table_t *table, uint32_t fd, int32_t offset, uint32_t whence, uint32_t *new_offset);
+int32_t fd_stat(fd_table_t *table, uint32_t fd, uint32_t *size_out, uint32_t *flags_out);
 
 #endif
