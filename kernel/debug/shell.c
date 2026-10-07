@@ -973,6 +973,10 @@ static void shell_cmd_ttytest(void) {
 static void shell_cmd_stdiotest(void) {
     process_t *process = sched_current_process_ptr();
     fs_node_t *tty = vfs_resolve("/dev/tty1");
+    static const uint8_t stdin_sample[] = {'O', 'K'};
+    static const uint8_t stdout_sample[] =
+        "[stdio] fd 1 -> /dev/tty1 OK\n";
+    uint8_t stdin_readback[sizeof(stdin_sample)];
     uint8_t ok = 1U;
 
     if (process == 0 || tty == 0) {
@@ -995,6 +999,33 @@ static void shell_cmd_stdiotest(void) {
             stderr_entry->access != FD_ACCESS_WRITE) {
             ok = 0U;
         }
+    }
+
+    if (ok) {
+        tty1_flush_input();
+        tty1_receive_char((char)stdin_sample[0]);
+        tty1_receive_char((char)stdin_sample[1]);
+
+        if (fd_read(
+                &process->fds,
+                0U,
+                stdin_readback,
+                sizeof(stdin_readback)) !=
+            (int32_t)sizeof(stdin_readback) ||
+            stdin_readback[0] != stdin_sample[0] ||
+            stdin_readback[1] != stdin_sample[1]) {
+            ok = 0U;
+        }
+    }
+
+    if (ok &&
+        fd_write(
+            &process->fds,
+            1U,
+            stdout_sample,
+            (uint32_t)sizeof(stdout_sample) - 1U) !=
+        (int32_t)((uint32_t)sizeof(stdout_sample) - 1U)) {
+        ok = 0U;
     }
 
     if (ok) {
