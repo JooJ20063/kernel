@@ -292,7 +292,7 @@ static struct ramfs_entry *ramfs_create_entry(
         entry->node.create = ramfs_create;
         entry->node.remove = ramfs_remove;
     } else {
-        entry->node.flags = FS_FILE | (writable ? FS_WRITABLE : 0U);
+        entry->node.flags = FS_FILE | FS_SEEKABLE | (writable ? FS_WRITABLE : 0U);
         entry->node.read = ramfs_read;
         entry->node.write = ramfs_write;
         entry->data_ptr = data_ptr;
