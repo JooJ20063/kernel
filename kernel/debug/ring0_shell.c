@@ -30,6 +30,7 @@ extern void user_ud_test_entry(void);
 extern void user_gp_test_entry(void);
 extern void user_aspace_test_entry(void);
 extern void user_tty_block_test_entry(void);
+extern void user_tty_foreground_test_entry(void);
 extern uint8_t user_stack_top;
 extern void enter_ring3(uint32_t entry, uint32_t user_stack);
 #endif
@@ -1371,7 +1372,7 @@ static void shell_run_command(const char *cmd) {
 
         reader_pid = sched_create_user_task(
             "tty-foreground-reader",
-            user_tty_block_test_entry,
+            user_tty_foreground_test_entry,
             (uintptr_t)&user_stack_top
         );
 
@@ -1382,7 +1383,7 @@ static void shell_run_command(const char *cmd) {
 
         vga_puts("ttyfgtest: foreground pid=");
         vga_putdec((uint32_t)reader_pid);
-        vga_puts(" - type Z (F12 aborts foreground ownership)\n");
+        vga_puts(" - type any key (F12 aborts foreground ownership)\n");
 
         tty1_set_foreground_pid((uint32_t)reader_pid);
     } else if (str_eq(cmd, "ring3fault")) {
