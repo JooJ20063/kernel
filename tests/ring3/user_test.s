@@ -809,8 +809,7 @@ after_sleep:
     .ascii "After sleep\n"
 after_sleep_end:
 
-.section .note.GNU-stack,"",@progbits
-h', tty_canon_buffer+0
+.section .note.GNU-stack,"",@progbitsh', tty_canon_buffer+0
     jne tty_canon_failed
     cmpb user_ud_test_entry:
     mov $1, %eax
@@ -1084,8 +1083,7 @@ after_sleep:
     .ascii "After sleep\n"
 after_sleep_end:
 
-.section .note.GNU-stack,"",@progbits
-e', tty_canon_buffer+1
+.section .note.GNU-stack,"",@progbitse', tty_canon_buffer+1
     jne tty_canon_failed
     cmpb user_ud_test_entry:
     mov $1, %eax
@@ -1359,8 +1357,7 @@ after_sleep:
     .ascii "After sleep\n"
 after_sleep_end:
 
-.section .note.GNU-stack,"",@progbits
-l', tty_canon_buffer+2
+.section .note.GNU-stack,"",@progbitsl', tty_canon_buffer+2
     jne tty_canon_failed
     cmpb user_ud_test_entry:
     mov $1, %eax
@@ -1634,8 +1631,7 @@ after_sleep:
     .ascii "After sleep\n"
 after_sleep_end:
 
-.section .note.GNU-stack,"",@progbits
-l', tty_canon_buffer+3
+.section .note.GNU-stack,"",@progbitsl', tty_canon_buffer+3
     jne tty_canon_failed
     cmpb user_ud_test_entry:
     mov $1, %eax
@@ -1909,8 +1905,7 @@ after_sleep:
     .ascii "After sleep\n"
 after_sleep_end:
 
-.section .note.GNU-stack,"",@progbits
-o', tty_canon_buffer+4
+.section .note.GNU-stack,"",@progbitso', tty_canon_buffer+4
     jne tty_canon_failed
     cmpb user_ud_test_entry:
     mov $1, %eax
@@ -2184,8 +2179,7 @@ after_sleep:
     .ascii "After sleep\n"
 after_sleep_end:
 
-.section .note.GNU-stack,"",@progbits
-\n', tty_canon_buffer+5
+.section .note.GNU-stack,"",@progbits\n', tty_canon_buffer+5
     jne tty_canon_failed
 
     mov $1, %eax
