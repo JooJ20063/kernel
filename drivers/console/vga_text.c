@@ -90,6 +90,14 @@ void vga_putc(char c) {
         return;
     }
 
+    if (c == '\b') {
+        if (cursor > 0U) {
+            cursor--;
+        }
+        vga_sync_hw_cursor();
+        return;
+    }
+
     VGA_MEM[cursor * 2] = (uint8_t)c;
     VGA_MEM[cursor * 2 + 1] = color;
     cursor++;

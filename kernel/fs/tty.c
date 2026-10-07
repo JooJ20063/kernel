@@ -12,6 +12,10 @@ static volatile uint32_t tty1_count;
 static volatile uint32_t tty1_drop_count;
 static volatile tty_input_focus_t tty1_focus;
 static volatile uint32_t tty1_foreground;
+static volatile tty_mode_t tty1_line_mode;
+static volatile uint8_t tty1_echo;
+static volatile uint32_t tty1_ready_lines;
+static volatile uint32_t tty1_current_line_len;
 static wait_queue_t tty1_read_waiters;
 
 static uint32_t tty_irq_save_disable(void) {
@@ -54,6 +58,22 @@ static void str_copy_limit(char *dst, const char *src, uint32_t limit) {
     dst[i] = 0;
 }
 
+static void tty1_reset_input_locked(void) {
+    tty1_head = 0U;
+    tty1_tail = 0U;
+    tty1_count = 0U;
+    tty1_ready_lines = 0U;
+    tty1_current_line_len = 0U;
+}
+
+static void tty1_echo_erase(void) {
+    /*
+     * "\b \b" works for both VGA and the mirrored serial console once
+     * vga_putc() gives backspace cursor semantics.
+     */
+    vga_puts("\b \b");
+}
+
 static int tty1_input_ready(void *ctx) {
     const uint32_t *pid = (const uint32_t *)ctx;
 
@@ -61,7 +81,15 @@ static int tty1_input_ready(void *ctx) {
         return 0;
     }
 
-    return tty1_foreground == *pid && tty1_count > 0U;
+    if (tty1_foreground != *pid) {
+        return 0;
+    }
+
+    if (tty1_line_mode == TTY_MODE_CANONICAL) {
+        return tty1_ready_lines > 0U;
+    }
+
+    return tty1_count > 0U;
 }
 
 static uint32_t tty1_read(
@@ -94,11 +122,35 @@ static uint32_t tty1_read(
              * drain the input ring.
              */
             if (tty1_foreground == caller_pid) {
-                while (read_count < size && tty1_count > 0U) {
-                    buffer[read_count++] = tty1_input[tty1_tail];
-                    tty1_tail =
-                        (tty1_tail + 1U) % TTY1_INPUT_CAPACITY;
-                    tty1_count--;
+                if (tty1_line_mode == TTY_MODE_CANONICAL) {
+                    /*
+                     * Canonical readers see data only after a complete line
+                     * exists. A short user buffer may split that line across
+                     * reads; ready_lines remains non-zero until its newline
+                     * is actually consumed.
+                     */
+                    if (tty1_ready_lines > 0U) {
+                        while (read_count < size && tty1_count > 0U) {
+                            uint8_t c = tty1_input[tty1_tail];
+
+                            tty1_tail =
+                                (tty1_tail + 1U) % TTY1_INPUT_CAPACITY;
+                            tty1_count--;
+                            buffer[read_count++] = c;
+
+                            if (c == (uint8_t)'\n') {
+                                tty1_ready_lines--;
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    while (read_count < size && tty1_count > 0U) {
+                        buffer[read_count++] = tty1_input[tty1_tail];
+                        tty1_tail =
+                            (tty1_tail + 1U) % TTY1_INPUT_CAPACITY;
+                        tty1_count--;
+                    }
                 }
             }
 
@@ -109,16 +161,16 @@ static uint32_t tty1_read(
             }
 
             /*
-             * Recheck foreground ownership and data availability atomically
-             * with queue insertion. This preserves the lost-wakeup guarantee
-             * while also keeping background readers asleep.
+             * Recheck foreground ownership and mode-specific readiness
+             * atomically with queue insertion. This preserves the existing
+             * lost-wakeup guarantee.
              */
             if (task_wait_until(
                     &tty1_read_waiters,
                     tty1_input_ready,
                     &caller_pid) != 0) {
                 /*
-                 * The bootstrap/idle context cannot sleep. Preserve the old
+                 * The bootstrap/idle context cannot sleep. Preserve the
                  * non-blocking behavior for that context only.
                  */
                 return 0U;
@@ -164,17 +216,85 @@ void tty1_init(void) {
     tty1_fs_node.open = tty1_noop;
     tty1_fs_node.close = tty1_noop;
 
-    tty1_head = 0U;
-    tty1_tail = 0U;
-    tty1_count = 0U;
+    tty1_reset_input_locked();
     tty1_drop_count = 0U;
     tty1_focus = TTY_INPUT_FOCUS_SHELL;
     tty1_foreground = 0U;
+    tty1_line_mode = TTY_MODE_RAW;
+    tty1_echo = 0U;
     wait_queue_init(&tty1_read_waiters);
 }
 
 void tty1_receive_char(char c) {
     uint32_t flags = tty_irq_save_disable();
+
+    if (c == '\r') {
+        c = '\n';
+    }
+
+    if (tty1_line_mode == TTY_MODE_CANONICAL) {
+        if (c == '\b') {
+            if (tty1_current_line_len > 0U) {
+                tty1_head =
+                    (tty1_head + TTY1_INPUT_CAPACITY - 1U) %
+                    TTY1_INPUT_CAPACITY;
+                tty1_count--;
+                tty1_current_line_len--;
+
+                if (tty1_echo != 0U) {
+                    tty1_echo_erase();
+                }
+            }
+
+            tty_irq_restore(flags);
+            return;
+        }
+
+        /*
+         * Keep one slot available for the newline that commits the current
+         * line. Without that reserve a full partial line could never become
+         * readable.
+         */
+        if (c != '\n' &&
+            tty1_count >= (TTY1_INPUT_CAPACITY - 1U)) {
+            tty1_drop_count++;
+            tty_irq_restore(flags);
+            return;
+        }
+
+        if (tty1_count >= TTY1_INPUT_CAPACITY) {
+            tty1_drop_count++;
+            tty_irq_restore(flags);
+            return;
+        }
+
+        tty1_input[tty1_head] = (uint8_t)c;
+        tty1_head = (tty1_head + 1U) % TTY1_INPUT_CAPACITY;
+        tty1_count++;
+
+        if (c == '\n') {
+            tty1_ready_lines++;
+            tty1_current_line_len = 0U;
+
+            if (tty1_echo != 0U) {
+                vga_putc('\n');
+            }
+
+            /*
+             * A canonical read becomes ready only at line commit.
+             */
+            wait_queue_wake_all(&tty1_read_waiters);
+        } else {
+            tty1_current_line_len++;
+
+            if (tty1_echo != 0U) {
+                vga_putc(c);
+            }
+        }
+
+        tty_irq_restore(flags);
+        return;
+    }
 
     if (tty1_count >= TTY1_INPUT_CAPACITY) {
         tty1_drop_count++;
@@ -185,6 +305,10 @@ void tty1_receive_char(char c) {
     tty1_input[tty1_head] = (uint8_t)c;
     tty1_head = (tty1_head + 1U) % TTY1_INPUT_CAPACITY;
     tty1_count++;
+
+    if (tty1_echo != 0U) {
+        vga_putc(c);
+    }
 
     /*
      * Foreground filtering means the first waiter is not necessarily the
@@ -198,9 +322,7 @@ void tty1_receive_char(char c) {
 void tty1_flush_input(void) {
     uint32_t flags = tty_irq_save_disable();
 
-    tty1_head = 0U;
-    tty1_tail = 0U;
-    tty1_count = 0U;
+    tty1_reset_input_locked();
 
     tty_irq_restore(flags);
 }
@@ -271,6 +393,40 @@ int tty1_release_foreground(uint32_t pid) {
 
     tty_irq_restore(flags);
     return released;
+}
+
+void tty1_set_mode(tty_mode_t mode) {
+    uint32_t flags = tty_irq_save_disable();
+
+    tty1_line_mode =
+        (mode == TTY_MODE_CANONICAL)
+            ? TTY_MODE_CANONICAL
+            : TTY_MODE_RAW;
+
+    /*
+     * Buffered bytes have different readiness semantics in each mode.
+     * Drop them at a mode boundary rather than reinterpret stale input.
+     */
+    tty1_reset_input_locked();
+    wait_queue_wake_all(&tty1_read_waiters);
+
+    tty_irq_restore(flags);
+}
+
+tty_mode_t tty1_mode(void) {
+    return tty1_line_mode;
+}
+
+void tty1_set_echo(int enabled) {
+    uint32_t flags = tty_irq_save_disable();
+
+    tty1_echo = enabled ? 1U : 0U;
+
+    tty_irq_restore(flags);
+}
+
+int tty1_echo_enabled(void) {
+    return tty1_echo != 0U;
 }
 
 uint32_t tty1_pending(void) {

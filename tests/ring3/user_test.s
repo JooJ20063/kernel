@@ -503,6 +503,62 @@ tty_fg_failed:
     jmp 1b
 
 
+.global user_tty_canonical_test_entry
+user_tty_canonical_test_entry:
+    # Canonical read must not return until Enter commits the line.
+    mov $1, %eax
+    mov $1, %ebx
+    mov $tty_canon_waiting, %ecx
+    mov $(tty_canon_waiting_end-tty_canon_waiting), %edx
+    int $0x80
+
+    mov $9, %eax
+    xor %ebx, %ebx
+    mov $tty_canon_buffer, %ecx
+    mov $32, %edx
+    int $0x80
+
+    cmp $6, %eax
+    jne tty_canon_failed
+
+    cmpb $'h', tty_canon_buffer+0
+    jne tty_canon_failed
+    cmpb $'e', tty_canon_buffer+1
+    jne tty_canon_failed
+    cmpb $'l', tty_canon_buffer+2
+    jne tty_canon_failed
+    cmpb $'l', tty_canon_buffer+3
+    jne tty_canon_failed
+    cmpb $'o', tty_canon_buffer+4
+    jne tty_canon_failed
+    cmpb $'\n', tty_canon_buffer+5
+    jne tty_canon_failed
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $tty_canon_ok, %ecx
+    mov $(tty_canon_ok_end-tty_canon_ok), %edx
+    int $0x80
+
+    mov $2, %eax
+    xor %ebx, %ebx
+    int $0x80
+
+tty_canon_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $tty_canon_fail, %ecx
+    mov $(tty_canon_fail_end-tty_canon_fail), %edx
+    int $0x80
+
+    mov $2, %eax
+    mov $1, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
 .global user_ud_test_entry
 user_ud_test_entry:
     mov $1, %eax
@@ -697,6 +753,22 @@ tty_fg_fail_end:
 
 tty_fg_byte:
     .byte 0
+
+tty_canon_waiting:
+    .ascii "ttycanon: waiting for line\n"
+tty_canon_waiting_end:
+
+tty_canon_ok:
+    .ascii "ttycanon: canonical read/backspace OK\n"
+tty_canon_ok_end:
+
+tty_canon_fail:
+    .ascii "ttycanon: FAILED\n"
+tty_canon_fail_end:
+
+.align 16
+tty_canon_buffer:
+    .skip 32
 
 fileio_path:
     .asciz "ring3.txt"
