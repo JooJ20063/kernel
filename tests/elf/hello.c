@@ -1,3 +1,6 @@
+static volatile unsigned int data_probe = 0x435A4B31U;
+static volatile unsigned int bss_probe;
+
 static int czk_write(int fd, const void *buffer, unsigned int size) {
     int result;
 
@@ -27,6 +30,10 @@ static void czk_exit(int code) {
 
 int main(void) {
     static const char message[] = "Hello from ELF!\n";
+
+    if (data_probe != 0x435A4B31U || bss_probe != 0U) {
+        czk_exit(3);
+    }
 
     (void)czk_write(1, message, 16U);
     czk_exit(0);
