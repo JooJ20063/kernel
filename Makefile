@@ -22,23 +22,23 @@ ISO_IMAGE := cruzeiro.iso
 C_SRCS := \
 	libk/memory.c \
 	drivers/console/serial_16550.c \
-	kernel/kernel.c \
+	kernel/core/main.c \
 	drivers/console/vga_text.c \
-	kernel/vmm.c \
-	kernel/pmm.c \
-	kernel/kmalloc.c \
-	kernel/vfs.c \
-	kernel/ramfs.c \
-	kernel/task.c \
-	kernel/klog.c \
-	kernel/panic.c \
-	kernel/shell.c \
+	kernel/mm/vmm.c \
+	kernel/mm/pmm.c \
+	kernel/mm/kmalloc.c \
+	kernel/fs/vfs.c \
+	kernel/fs/ramfs.c \
+	kernel/sched/task.c \
+	kernel/core/klog.c \
+	kernel/core/panic.c \
+	kernel/debug/shell.c \
 	arch/x86/idt.c \
 	arch/x86/irq.c \
 	arch/x86/pic.c \
 	arch/x86/fpu.c \
 	arch/x86/tss.c \
-	kernel/syscall.c
+	kernel/syscall/syscall.c
 
 
 ASM_SRCS := \
