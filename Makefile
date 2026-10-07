@@ -21,9 +21,9 @@ ISO_IMAGE := cruzeiro.iso
 
 C_SRCS := \
 	libk/memory.c \
-	kernel/serial.c \
+	drivers/console/serial_16550.c \
 	kernel/kernel.c \
-	kernel/vga.c \
+	drivers/console/vga_text.c \
 	kernel/vmm.c \
 	kernel/pmm.c \
 	kernel/kmalloc.c \
