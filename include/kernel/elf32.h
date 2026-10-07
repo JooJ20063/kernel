@@ -3,10 +3,7 @@
 #include <stdint.h>
 #include <kernel/vfs.h>
 #include <arch/x86/regs.h>
-
-#define ELF32_EXEC_MAX_ARGS   16U
-#define ELF32_EXEC_MAX_ENVS   16U
-#define ELF32_EXEC_MAX_STRING 128U
+#include <czk/abi.h>
 
 #define ELF32_NIDENT 16U
 
