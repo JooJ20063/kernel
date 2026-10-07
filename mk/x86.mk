@@ -14,9 +14,7 @@ USER_HELLO_OBJ := $(USER_ELF_DIR)/hello.o
 USER_HELLO := $(USER_ELF_DIR)/hello
 INITRD_ROOT := $(BUILD_DIR)/initrd-root
 INITRD_IMAGE := $(BUILD_DIR)/initrd.tar
-USER_CFLAGS := -m32 -ffreestanding -Wall -Wextra -Werror \\
-	-fno-pic -fno-pie -fno-stack-protector \\
-	-fno-asynchronous-unwind-tables -fno-unwind-tables
+USER_CFLAGS := -m32 -ffreestanding -Wall -Wextra -Werror -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables
 
 C_SRCS := \
 	libk/memory.c \
