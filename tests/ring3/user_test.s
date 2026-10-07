@@ -1,4 +1,9 @@
 .section .usertext, "ax", @progbits
+
+.set CZK_EBADF, 9
+.set CZK_ECHILD, 10
+.set CZK_EFAULT, 14
+.set CZK_ENOSYS, 38
 .global user_test_entry
 
 user_test_entry:
@@ -17,7 +22,7 @@ user_test_entry:
     mov $4, %edx
     int $0x80
 
-    cmp $0xFFFFFFFF, %eax
+    cmp $-CZK_EFAULT, %eax
     jne uaccess_test_failed
 
     mov $1, %eax
@@ -35,6 +40,47 @@ uaccess_test_failed:
     int $0x80
 
 uaccess_test_done:
+
+    # Invalid fd must return -EBADF.
+    mov $1, %eax
+    mov $99, %ebx
+    mov $user_message, %ecx
+    mov $1, %edx
+    int $0x80
+
+    cmp $-CZK_EBADF, %eax
+    jne abi_error_test_failed
+
+    # wait(NULL) with no child must return -ECHILD.
+    mov $7, %eax
+    xor %ebx, %ebx
+    int $0x80
+
+    cmp $-CZK_ECHILD, %eax
+    jne abi_error_test_failed
+
+    # Unknown syscall must return -ENOSYS.
+    mov $0x7FFFFFFF, %eax
+    int $0x80
+
+    cmp $-CZK_ENOSYS, %eax
+    jne abi_error_test_failed
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $abi_error_ok, %ecx
+    mov $(abi_error_ok_end-abi_error_ok), %edx
+    int $0x80
+    jmp abi_error_test_done
+
+abi_error_test_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $abi_error_fail, %ecx
+    mov $(abi_error_fail_end-abi_error_fail), %edx
+    int $0x80
+
+abi_error_test_done:
 
     # getpid()
     mov $3, %eax
@@ -201,6 +247,14 @@ uaccess_ok_end:
 uaccess_fail:
     .ascii "uaccess: kernel pointer ACCEPTED\n"
 uaccess_fail_end:
+
+abi_error_ok:
+    .ascii "abi: typed syscall errors ok\n"
+abi_error_ok_end:
+
+abi_error_fail:
+    .ascii "abi: typed syscall errors FAILED\n"
+abi_error_fail_end:
 
 pid_message:
     .ascii "pid="
