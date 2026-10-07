@@ -239,17 +239,7 @@ void task_sleep_prepare(uint32_t ticks) {
     current->state = TASK_BLOCKED;
 }
 
-void task_wait(wait_queue_t *queue) {
-    uint32_t flags;
-
-    if (queue == 0 ||
-        current == 0 ||
-        current == &idle_task) {
-        return;
-    }
-
-    flags = irq_save_disable();
-
+static void task_wait_enqueue_current(wait_queue_t *queue) {
     current->wait_next = 0;
     current->wake_tick = 0;
     current->block_reason = TASK_BLOCK_EVENT;
@@ -262,17 +252,15 @@ void task_wait(wait_queue_t *queue) {
         queue->tail->wait_next = current;
         queue->tail = current;
     }
+}
 
+static void task_wait_schedule(uint32_t flags) {
     /*
-     * Se IF estava ligado antes do CLI:
-     *
-     * STI só permite IRQ externa depois da instrução seguinte.
-     * A instrução seguinte é justamente INT $0x81.
-     *
-     * Portanto não existe janela entre desbloquear IRQ e entrar
-     * no scheduler.
+     * If IF was set before CLI, STI defers external IRQ delivery until
+     * after the next instruction. That next instruction is INT $0x81,
+     * so there is no wakeup gap between queueing and scheduling away.
      */
-    if (flags & (1U << 9)) {
+    if ((flags & (1U << 9)) != 0U) {
         asm volatile (
             "sti\n"
             "int $0x81"
@@ -288,6 +276,51 @@ void task_wait(wait_queue_t *queue) {
             : "memory"
         );
     }
+}
+
+void task_wait(wait_queue_t *queue) {
+    uint32_t flags;
+
+    if (queue == 0 ||
+        current == 0 ||
+        current == &idle_task) {
+        return;
+    }
+
+    flags = irq_save_disable();
+    task_wait_enqueue_current(queue);
+    task_wait_schedule(flags);
+}
+
+int task_wait_until(
+    wait_queue_t *queue,
+    wait_condition_t condition,
+    void *ctx
+) {
+    uint32_t flags;
+
+    if (queue == 0 ||
+        condition == 0 ||
+        current == 0 ||
+        current == &idle_task) {
+        return -1;
+    }
+
+    flags = irq_save_disable();
+
+    /*
+     * The readiness check and queue insertion happen under the same IRQ
+     * exclusion window. Producers cannot make the condition true between
+     * these two operations, so event wakeups cannot be lost.
+     */
+    if (condition(ctx)) {
+        irq_restore(flags);
+        return 0;
+    }
+
+    task_wait_enqueue_current(queue);
+    task_wait_schedule(flags);
+    return 0;
 }
 
 int wait_queue_wake_one(wait_queue_t *queue) {
