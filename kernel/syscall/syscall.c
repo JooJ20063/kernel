@@ -463,16 +463,22 @@ registers_t *syscall_handler(registers_t *regs) {
 }
 
 uint32_t syscall_test_write(void) {
-    static const char message[] = "hello from int 0x80\n";
+    extern uint8_t syscall_test_message;
+    extern uint8_t syscall_test_message_end;
     uint32_t result;
+    uint32_t length =
+        (uint32_t)(
+            (uintptr_t)&syscall_test_message_end -
+            (uintptr_t)&syscall_test_message
+        );
 
     asm volatile (
         "int $0x80"
         : "=a"(result)
         : "a"(SYS_WRITE),
           "b"(1U),
-          "c"(message),
-          "d"((uint32_t)(sizeof(message) - 1U))
+          "c"(&syscall_test_message),
+          "d"(length)
         : "memory"
     );
 
