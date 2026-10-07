@@ -59,7 +59,7 @@ GRUB
    ↓
 Multiboot2
    ↓
-boot/boot.s
+arch/x86/boot/boot.s
    ↓
 GDT
    ↓
@@ -75,7 +75,7 @@ subsystem initialization
 The file:
 
 ```text
-boot/boot.s
+arch/x86/boot/boot.s
 ```
 
 contains `_start`, which represents the initial execution point of the kernel.
