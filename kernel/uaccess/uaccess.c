@@ -110,3 +110,40 @@ int copy_to_user(void *user_dst, const void *kernel_src, size_t len) {
 
     return 0;
 }
+
+int copy_string_from_user(
+    char *kernel_dst,
+    const char *user_src,
+    size_t dst_size
+) {
+    uintptr_t base;
+
+    if (kernel_dst == 0 || user_src == 0 || dst_size == 0U) {
+        return -1;
+    }
+
+    base = (uintptr_t)user_src;
+
+    for (size_t i = 0; i < dst_size; ++i) {
+        char ch;
+
+        if ((uintptr_t)i > UACCESS_PTR_MAX - base) {
+            return -1;
+        }
+
+        if (copy_from_user(
+                &ch,
+                (const void *)(base + (uintptr_t)i),
+                1U) != 0) {
+            return -1;
+        }
+
+        kernel_dst[i] = ch;
+
+        if (ch == 0) {
+            return 0;
+        }
+    }
+
+    return -2;
+}
