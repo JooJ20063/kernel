@@ -3,7 +3,7 @@ AS := as
 LD := ld
 
 
-CFLAGS := -m32 -ffreestanding -Iinclude -Iuapi/include -Wall -Wextra -Werror
+CFLAGS := -m32 -ffreestanding -Iinclude -Ilibk/include -Iuapi/include -Wall -Wextra -Werror
 KERNEL_X86_NOSIMD := -mno-sse -mno-sse2 -mno-mmx
 override CFLAGS += $(KERNEL_X86_NOSIMD)
 ASFLAGS := --32
