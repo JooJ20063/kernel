@@ -895,6 +895,7 @@ void task_yield(void) {
 void task_exit_code(int32_t code) {
     if (current != 0) {
         current->exit_code = code;
+        fd_table_close_all(&current->fds);
         current->block_reason = TASK_BLOCK_NONE;
         current->wake_tick = 0;
         current->state = TASK_ZOMBIE;
@@ -916,6 +917,7 @@ registers_t *task_exit_from_exception(registers_t *regs, int32_t exit_code) {
 
     current->context = regs;
     current->exit_code = exit_code;
+    fd_table_close_all(&current->fds);
     current->block_reason = TASK_BLOCK_NONE;
     current->wake_tick = 0;
     current->state = TASK_ZOMBIE;
