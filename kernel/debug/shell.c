@@ -667,13 +667,16 @@ static void shell_run_command(const char *cmd) {
         vga_putdec(irq_timer_hz());
         vga_puts("\n");
     } else if (str_eq(cmd, "task")) {
-        vga_puts("current pid=");
+        vga_puts("current tid=");
+        vga_putdec(sched_current_task());
+
+        vga_puts(" pid=");
         vga_putdec(sched_current_pid());
 
-        vga_puts(" tasks=\n");
+        vga_puts(" tasks=");
         vga_putdec(sched_task_count());
 
-        vga_puts(" switches=\n");
+        vga_puts(" switches=");
         vga_putdec(sched_switch_count());
 
         vga_puts(" demoA=\n");

@@ -29,6 +29,8 @@ kernel/
 ├── fs/
 ├── mm/
 ├── sched/
+│   ├── process.c
+│   └── task.c
 └── syscall/
 
 libk/
@@ -50,6 +52,7 @@ mk/
 
 - `arch/` contém implementação dependente da arquitetura.
 - `kernel/` contém subsistemas conceitualmente independentes da arquitetura.
+- `kernel/sched/process.c` mantém recursos e identidade de processo; `task.c` mantém contextos escalonáveis e scheduling.
 - `drivers/` contém código que conversa diretamente com dispositivos.
 - `libk/` contém primitivas C freestanding usadas pelo kernel.
 - `uapi/` contém somente contratos que podem ser compartilhados com userspace.
