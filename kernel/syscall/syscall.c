@@ -77,11 +77,35 @@ registers_t *syscall_handler(registers_t *regs) {
             return sched_yield_irq(regs);
         
         case SYS_WAIT: {
+            int32_t *user_status =
+                (int32_t *)(uintptr_t)regs->ebx;
             int32_t status = 0;
-            int32_t pid = task_wait_child(&status);
+            int32_t pid;
+
+            /*
+             * Validate the userspace destination before reaping the child.
+             * A bad status pointer must not consume a zombie process.
+             * A null pointer is valid and behaves like wait(NULL).
+             */
+            if (user_status != 0 &&
+                !user_ptr_valid(user_status, sizeof(status), 1)) {
+                regs->eax = 0xFFFFFFFFU;
+                break;
+            }
+
+            pid = task_wait_child(&status);
+            if (pid < 0) {
+                regs->eax = (uint32_t)pid;
+                break;
+            }
+
+            if (user_status != 0 &&
+                copy_to_user(user_status, &status, sizeof(status)) != 0) {
+                regs->eax = 0xFFFFFFFFU;
+                break;
+            }
 
             regs->eax = (uint32_t)pid;
-            regs->edx = (uint32_t)status;
             break;
         }
 
