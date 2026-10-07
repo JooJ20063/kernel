@@ -6,6 +6,18 @@
 #define VMM_PAGE_RW      0x002U
 #define VMM_PAGE_USER    0x004U
 
+#define VMM_PAGE_SIZE     0x1000U
+
+/*
+ * Current CZK_x86 userspace virtual-address window.
+ *
+ * 0x00000000-0x00FFFFFF remains reserved for bootstrap/kernel mappings
+ * and the kernel heap. PDEs 1022-1023 are reserved for the temporary
+ * physical mapping window and future recursive paging.
+ */
+#define VMM_USER_MIN_ADDR 0x01000000U
+#define VMM_USER_MAX_ADDR 0xFF800000U
+
 void vmm_init(void);
 uint8_t vmm_is_enabled(void);
 uint8_t vmm_wp_is_enabled(void);
@@ -41,6 +53,27 @@ int vmm_clone_user_range(
     uintptr_t start,
     uintptr_t end,
     uint32_t flags
+);
+
+int vmm_map_user_page(
+    uint32_t cr3,
+    uintptr_t virt_addr,
+    uintptr_t phys_addr,
+    uint32_t flags
+);
+int vmm_set_user_page_flags(
+    uint32_t cr3,
+    uintptr_t virt_addr,
+    uint32_t flags
+);
+uintptr_t vmm_translate_address_space(
+    uint32_t cr3,
+    uintptr_t virt_addr
+);
+int vmm_get_page_flags_address_space(
+    uint32_t cr3,
+    uintptr_t virt_addr,
+    uint32_t *flags_out
 );
 
 int vmm_map_page(uintptr_t virt_addr, uintptr_t phys_addr, uint32_t flags);
