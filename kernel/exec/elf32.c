@@ -52,6 +52,20 @@ static int elf32_validate_load_segment(
         return ELF32_ERR_SEGMENT_SIZE;
     }
 
+    /*
+     * A zero-sized PT_LOAD has no file bytes and reserves no virtual
+     * memory. GNU ld may emit one for an explicitly declared PHDR whose
+     * output section is empty. Treat it as inert before applying offset,
+     * address and alignment constraints that only matter for loadable
+     * contents.
+     */
+    if (program_header->p_memsz == 0U) {
+        if (segment_end_out != 0) {
+            *segment_end_out = program_header->p_vaddr;
+        }
+        return ELF32_OK;
+    }
+
     if (program_header->p_offset > file_size ||
         program_header->p_filesz >
             file_size - program_header->p_offset) {
