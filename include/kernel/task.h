@@ -74,6 +74,14 @@ int sched_create_user_task_in_address_space(
     uint32_t cr3
 );
 
+int sched_exec_current_address_space(
+    const char *name,
+    uintptr_t entry,
+    uintptr_t user_stack_top,
+    uint32_t cr3,
+    registers_t *regs
+);
+
 void sched_demo_init(void);
 
 uint32_t sched_demo_counter_a(void);
