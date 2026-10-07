@@ -3,7 +3,7 @@ AS := as
 LD := ld
 
 
-CFLAGS := -m32 -ffreestanding -Iinclude -Wall -Wextra -Werror
+CFLAGS := -m32 -ffreestanding -Iinclude -Iuapi/include -Wall -Wextra -Werror
 KERNEL_X86_NOSIMD := -mno-sse -mno-sse2 -mno-mmx
 override CFLAGS += $(KERNEL_X86_NOSIMD)
 ASFLAGS := --32
@@ -61,7 +61,7 @@ ISO_BOOT := $(ISO_DIR)/boot
 ISO_GRUB := $(ISO_BOOT)/grub
 
 
-CFLAGS64 := -m64 -ffreestanding -Iinclude -Wall -Wextra -Werror
+CFLAGS64 := -m64 -ffreestanding -Iinclude -Iuapi/include -Wall -Wextra -Werror
 ASFLAGS64 := --64
 LDFLAGS64 := -m elf_x86_64 -T linker64.ld
 
