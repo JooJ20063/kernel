@@ -7,7 +7,7 @@ CFLAGS := -m32 -ffreestanding -Iinclude -Wall -Wextra -Werror
 KERNEL_X86_NOSIMD := -mno-sse -mno-sse2 -mno-mmx
 override CFLAGS += $(KERNEL_X86_NOSIMD)
 ASFLAGS := --32
-LDFLAGS := -m elf_i386 -T linker.ld
+LDFLAGS := -m elf_i386 -T arch/x86/linker.ld
 
 
 BUILD_DIR := build
@@ -42,11 +42,11 @@ C_SRCS := \
 
 
 ASM_SRCS := \
-	boot/boot.s \
-	boot/gdt.s \
-	boot/isr.s \
-	boot/irq.s \
-	boot/idt_descriptor.s \
+	arch/x86/boot/boot.s \
+	arch/x86/boot/gdt.s \
+	arch/x86/boot/isr.s \
+	arch/x86/boot/irq.s \
+	arch/x86/boot/idt_descriptor.s \
 	user/user_test.s \
 	user/enter_ring3.s 
 
