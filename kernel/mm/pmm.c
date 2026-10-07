@@ -3,6 +3,7 @@
 
 #define PMM_MAX_MEMORY (512U * 1024U * 1024U)
 #define PMM_MAX_FRAMES (PMM_MAX_MEMORY / PMM_FRAME_SIZE)
+#define PMM_TABLE_FRAME_LIMIT 0x00C00000U
 
 static uint8_t frame_bitmap[PMM_MAX_FRAMES / 8];
 static uint8_t table_frame_bitmap[PMM_MAX_FRAMES / 8];
@@ -136,6 +137,30 @@ uint32_t pmm_alloc_frame(void) {
     return 0;
 }
 
+uint32_t pmm_alloc_frame_below(uint32_t limit_addr) {
+    uint32_t max_frame;
+
+    if (free_frames == 0U || limit_addr < PMM_FRAME_SIZE) {
+        return 0U;
+    }
+
+    max_frame = limit_addr / PMM_FRAME_SIZE;
+    if (max_frame > total_frames) {
+        max_frame = total_frames;
+    }
+
+    for (uint32_t frame = 0U; frame < max_frame; ++frame) {
+        if (!test_bit(frame_bitmap, frame)) {
+            set_bit(frame_bitmap, frame);
+            clear_bit(table_frame_bitmap, frame);
+            free_frames--;
+            return frame * PMM_FRAME_SIZE;
+        }
+    }
+
+    return 0U;
+}
+
 void pmm_free_frame(uint32_t frame_addr) {
     uint32_t frame = frame_addr / PMM_FRAME_SIZE;
 
@@ -151,7 +176,7 @@ void pmm_free_frame(uint32_t frame_addr) {
 }
 
 uint32_t pmm_alloc_table_frame(void) {
-    uint32_t frame_addr = pmm_alloc_frame();
+    uint32_t frame_addr = pmm_alloc_frame_below(PMM_TABLE_FRAME_LIMIT);
     uint32_t frame;
 
     if (frame_addr == 0) {
