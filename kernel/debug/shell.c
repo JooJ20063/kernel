@@ -29,6 +29,7 @@ extern void user_fault_test_entry(void);
 extern void user_ud_test_entry(void);
 extern void user_gp_test_entry(void);
 extern void user_aspace_test_entry(void);
+extern void user_tty_block_test_entry(void);
 extern uint8_t user_stack_top;
 extern void enter_ring3(uint32_t entry, uint32_t user_stack);
 #endif
@@ -1046,9 +1047,17 @@ static void shell_cmd_stdiotest(void) {
     vga_puts("\n");
 }
 
+#ifndef __x86_64__
+static void ttyblock_waker_task(void) {
+    task_sleep_ticks(100U);
+    tty1_receive_char('Z');
+    task_exit();
+}
+#endif
+
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest stdiotest wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest stdiotest ttyblocktest wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
@@ -1268,6 +1277,39 @@ static void shell_run_command(const char *cmd) {
 
         vga_puts("Ring 3 task created pid=");
         vga_putdec((uint32_t)pid);
+        vga_puts("\n");
+    } else if (str_eq(cmd, "ttyblocktest")) {
+        int reader_pid;
+        int waker_pid;
+
+        tty1_flush_input();
+
+        reader_pid = sched_create_user_task(
+            "tty-block-reader",
+            user_tty_block_test_entry,
+            (uintptr_t)&user_stack_top
+        );
+
+        if (reader_pid < 0) {
+            klog_warn("failed to create tty block reader");
+            return;
+        }
+
+        waker_pid = sched_create_kernel_task(
+            "tty-block-waker",
+            ttyblock_waker_task
+        );
+
+        if (waker_pid < 0) {
+            tty1_receive_char('!');
+            klog_warn("failed to create tty block waker");
+            return;
+        }
+
+        vga_puts("ttyblocktest: reader pid=");
+        vga_putdec((uint32_t)reader_pid);
+        vga_puts(" waker pid=");
+        vga_putdec((uint32_t)waker_pid);
         vga_puts("\n");
     } else if (str_eq(cmd, "ring3fault")) {
         int pid;

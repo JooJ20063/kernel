@@ -44,6 +44,8 @@ typedef struct wait_queue {
     task_t *tail;
 } wait_queue_t;
 
+typedef int (*wait_condition_t)(void *ctx);
+
 void sched_init(uint32_t quantum_ticks);
 void sched_set_bootstrap_address_space(uint32_t cr3);
 registers_t *sched_tick_irq(registers_t *regs);
@@ -83,6 +85,7 @@ void wait_queue_init(wait_queue_t *queue);
 int wait_queue_wake_one(wait_queue_t *queue);
 void wait_queue_wake_all(wait_queue_t *queue);
 void task_wait(wait_queue_t *queue);
+int task_wait_until(wait_queue_t *queue, wait_condition_t condition, void *ctx);
 void task_yield(void);
 void task_exit_code(int32_t exit_code) __attribute__((noreturn));
 void task_exit(void) __attribute__((noreturn));

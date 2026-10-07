@@ -401,6 +401,53 @@ seek_stdio_test_done:
     jmp 1b
 
 
+.global user_tty_block_test_entry
+user_tty_block_test_entry:
+    # Announce before blocking on stdin.
+    mov $1, %eax
+    mov $1, %ebx
+    mov $tty_block_waiting, %ecx
+    mov $(tty_block_waiting_end-tty_block_waiting), %edx
+    int $0x80
+
+    # read(0, &tty_block_byte, 1) must sleep until the waker injects input.
+    mov $9, %eax
+    xor %ebx, %ebx
+    mov $tty_block_byte, %ecx
+    mov $1, %edx
+    int $0x80
+
+    cmp $1, %eax
+    jne tty_block_failed
+
+    cmpb $'Z', tty_block_byte
+    jne tty_block_failed
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $tty_block_ok, %ecx
+    mov $(tty_block_ok_end-tty_block_ok), %edx
+    int $0x80
+
+    mov $2, %eax
+    xor %ebx, %ebx
+    int $0x80
+
+tty_block_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $tty_block_fail, %ecx
+    mov $(tty_block_fail_end-tty_block_fail), %edx
+    int $0x80
+
+    mov $2, %eax
+    mov $1, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
 .global user_ud_test_entry
 user_ud_test_entry:
     mov $1, %eax
@@ -561,6 +608,21 @@ fd_table_ok_end:
 fd_table_fail:
     .ascii "fdtable: stdio routing FAILED\n"
 fd_table_fail_end:
+
+tty_block_waiting:
+    .ascii "ttyblock: waiting for stdin\n"
+tty_block_waiting_end:
+
+tty_block_ok:
+    .ascii "ttyblock: read woke with Z\n"
+tty_block_ok_end:
+
+tty_block_fail:
+    .ascii "ttyblock: FAILED\n"
+tty_block_fail_end:
+
+tty_block_byte:
+    .byte 0
 
 fileio_path:
     .asciz "ring3.txt"
