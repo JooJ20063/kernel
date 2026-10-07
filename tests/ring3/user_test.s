@@ -9,6 +9,33 @@ user_test_entry:
     mov $(user_message_end-user_message), %edx
     int $0x80
 
+    # Attempt to pass a kernel-only address to write().
+    # The kernel must reject it with -1 instead of faulting.
+    mov $1, %eax
+    mov $1, %ebx
+    mov $0x00100000, %ecx
+    mov $4, %edx
+    int $0x80
+
+    cmp $0xFFFFFFFF, %eax
+    jne uaccess_test_failed
+
+    mov $1, %eax
+    mov $1, %ebx
+    mov $uaccess_ok, %ecx
+    mov $(uaccess_ok_end-uaccess_ok), %edx
+    int $0x80
+    jmp uaccess_test_done
+
+uaccess_test_failed:
+    mov $1, %eax
+    mov $1, %ebx
+    mov $uaccess_fail, %ecx
+    mov $(uaccess_fail_end-uaccess_fail), %edx
+    int $0x80
+
+uaccess_test_done:
+
     # getpid()
     mov $3, %eax
     int $0x80
@@ -97,6 +124,14 @@ user_stack_top:
 user_message:
     .ascii "Hello from ring 3\n"
 user_message_end:
+
+uaccess_ok:
+    .ascii "uaccess: kernel pointer rejected\n"
+uaccess_ok_end:
+
+uaccess_fail:
+    .ascii "uaccess: kernel pointer ACCEPTED\n"
+uaccess_fail_end:
 
 pid_message:
     .ascii "pid="
