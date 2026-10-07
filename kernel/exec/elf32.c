@@ -756,6 +756,91 @@ fail:
     return status;
 }
 
+static int elf32_write_user_virtual(
+    uint32_t cr3,
+    uintptr_t virt_addr,
+    const void *source,
+    uint32_t size
+) {
+    const uint8_t *src = (const uint8_t *)source;
+    uint32_t remaining = size;
+    uintptr_t target = virt_addr;
+
+    if (source == 0 && size != 0U) {
+        return ELF32_ERR_ARGUMENT;
+    }
+
+    while (remaining != 0U) {
+        uint32_t page_remaining =
+            VMM_PAGE_SIZE -
+            (uint32_t)(target & (VMM_PAGE_SIZE - 1U));
+        uint32_t chunk =
+            elf32_min_u32(remaining, page_remaining);
+        uintptr_t phys =
+            vmm_translate_address_space(cr3, target);
+
+        if (phys == 0U) {
+            return ELF32_ERR_STACK_MAP;
+        }
+
+        if (vmm_copy_to_phys(phys, src, chunk) != 0) {
+            return ELF32_ERR_SEGMENT_COPY;
+        }
+
+        src += chunk;
+        target += chunk;
+        remaining -= chunk;
+    }
+
+    return ELF32_OK;
+}
+
+static int elf32_string_size(
+    const char *value,
+    uint32_t *size_out
+) {
+    if (value == 0 || size_out == 0) {
+        return ELF32_ERR_ARGUMENT;
+    }
+
+    for (uint32_t i = 0U;
+         i < ELF32_EXEC_MAX_STRING;
+         ++i) {
+        if (value[i] == 0) {
+            *size_out = i + 1U;
+            return ELF32_OK;
+        }
+    }
+
+    return ELF32_ERR_STACK_ARGS;
+}
+
+static int elf32_push_u32(
+    uint32_t cr3,
+    uintptr_t stack_bottom,
+    uintptr_t *stack_pointer,
+    uint32_t value
+) {
+    uintptr_t sp;
+
+    if (stack_pointer == 0 || *stack_pointer < stack_bottom + 4U) {
+        return ELF32_ERR_STACK_ARGS;
+    }
+
+    sp = *stack_pointer - 4U;
+
+    if (elf32_write_user_virtual(
+            cr3,
+            sp,
+            &value,
+            sizeof(value)) != ELF32_OK) {
+        return ELF32_ERR_STACK_MAP;
+    }
+
+    *stack_pointer = sp;
+    return ELF32_OK;
+}
+
 static int elf32_map_user_stack(
     uint32_t cr3,
     uintptr_t *stack_top_out
@@ -806,12 +891,152 @@ static int elf32_map_user_stack(
     return ELF32_OK;
 }
 
+static int elf32_build_initial_stack(
+    uint32_t cr3,
+    const char *const argv[],
+    uint32_t argc,
+    const char *const envp[],
+    uint32_t envc,
+    uintptr_t *stack_pointer_out
+) {
+    uintptr_t stack_top = 0U;
+    uintptr_t stack_bottom;
+    uintptr_t sp;
+    uint32_t argv_addrs[ELF32_EXEC_MAX_ARGS];
+    uint32_t envp_addrs[ELF32_EXEC_MAX_ENVS];
+    int status;
+
+    if (stack_pointer_out == 0 ||
+        argc > ELF32_EXEC_MAX_ARGS ||
+        envc > ELF32_EXEC_MAX_ENVS ||
+        (argc != 0U && argv == 0) ||
+        (envc != 0U && envp == 0)) {
+        return ELF32_ERR_STACK_ARGS;
+    }
+
+    status = elf32_map_user_stack(cr3, &stack_top);
+    if (status != ELF32_OK) {
+        return status;
+    }
+
+    stack_bottom =
+        stack_top -
+        (ELF32_USER_STACK_PAGES * VMM_PAGE_SIZE);
+    sp = stack_top;
+
+    for (uint32_t i = envc; i > 0U; --i) {
+        uint32_t index = i - 1U;
+        uint32_t string_size;
+
+        status = elf32_string_size(
+            envp[index],
+            &string_size
+        );
+        if (status != ELF32_OK ||
+            sp < stack_bottom + string_size) {
+            return ELF32_ERR_STACK_ARGS;
+        }
+
+        sp -= string_size;
+
+        status = elf32_write_user_virtual(
+            cr3,
+            sp,
+            envp[index],
+            string_size
+        );
+        if (status != ELF32_OK) {
+            return status;
+        }
+
+        envp_addrs[index] = (uint32_t)sp;
+    }
+
+    for (uint32_t i = argc; i > 0U; --i) {
+        uint32_t index = i - 1U;
+        uint32_t string_size;
+
+        status = elf32_string_size(
+            argv[index],
+            &string_size
+        );
+        if (status != ELF32_OK ||
+            sp < stack_bottom + string_size) {
+            return ELF32_ERR_STACK_ARGS;
+        }
+
+        sp -= string_size;
+
+        status = elf32_write_user_virtual(
+            cr3,
+            sp,
+            argv[index],
+            string_size
+        );
+        if (status != ELF32_OK) {
+            return status;
+        }
+
+        argv_addrs[index] = (uint32_t)sp;
+    }
+
+    sp &= ~(uintptr_t)0x3U;
+
+    status = elf32_push_u32(cr3, stack_bottom, &sp, 0U);
+    if (status != ELF32_OK) {
+        return status;
+    }
+
+    for (uint32_t i = envc; i > 0U; --i) {
+        status = elf32_push_u32(
+            cr3,
+            stack_bottom,
+            &sp,
+            envp_addrs[i - 1U]
+        );
+        if (status != ELF32_OK) {
+            return status;
+        }
+    }
+
+    status = elf32_push_u32(cr3, stack_bottom, &sp, 0U);
+    if (status != ELF32_OK) {
+        return status;
+    }
+
+    for (uint32_t i = argc; i > 0U; --i) {
+        status = elf32_push_u32(
+            cr3,
+            stack_bottom,
+            &sp,
+            argv_addrs[i - 1U]
+        );
+        if (status != ELF32_OK) {
+            return status;
+        }
+    }
+
+    status = elf32_push_u32(
+        cr3,
+        stack_bottom,
+        &sp,
+        argc
+    );
+    if (status != ELF32_OK) {
+        return status;
+    }
+
+    *stack_pointer_out = sp;
+    return ELF32_OK;
+}
+
 int elf32_spawn(
     fs_node_t *node,
     uint32_t *pid_out
 ) {
     elf32_loaded_image_t loaded = {0};
-    uintptr_t user_stack_top = 0U;
+    const char *argv[1];
+    uintptr_t user_stack_pointer = 0U;
     int status;
     int pid;
 
@@ -824,9 +1049,15 @@ int elf32_spawn(
         return status;
     }
 
-    status = elf32_map_user_stack(
+    argv[0] = node->name;
+
+    status = elf32_build_initial_stack(
         loaded.cr3,
-        &user_stack_top
+        argv,
+        1U,
+        0,
+        0U,
+        &user_stack_pointer
     );
     if (status != ELF32_OK) {
         elf32_unload_image(&loaded);
@@ -836,7 +1067,7 @@ int elf32_spawn(
     pid = sched_create_user_task_in_address_space(
         node->name,
         (uintptr_t)loaded.entry,
-        user_stack_top,
+        user_stack_pointer,
         loaded.cr3
     );
 
@@ -851,6 +1082,58 @@ int elf32_spawn(
      */
     loaded.cr3 = 0U;
     *pid_out = (uint32_t)pid;
+    return ELF32_OK;
+}
+
+int elf32_exec_current(
+    fs_node_t *node,
+    const char *const argv[],
+    uint32_t argc,
+    const char *const envp[],
+    uint32_t envc,
+    registers_t *regs
+) {
+    elf32_loaded_image_t loaded = {0};
+    uintptr_t user_stack_pointer = 0U;
+    int status;
+
+    if (node == 0 || regs == 0) {
+        return ELF32_ERR_ARGUMENT;
+    }
+
+    status = elf32_load_image(node, &loaded);
+    if (status != ELF32_OK) {
+        return status;
+    }
+
+    status = elf32_build_initial_stack(
+        loaded.cr3,
+        argv,
+        argc,
+        envp,
+        envc,
+        &user_stack_pointer
+    );
+    if (status != ELF32_OK) {
+        elf32_unload_image(&loaded);
+        return status;
+    }
+
+    if (sched_exec_current_address_space(
+            node->name,
+            (uintptr_t)loaded.entry,
+            user_stack_pointer,
+            loaded.cr3,
+            regs) != 0) {
+        elf32_unload_image(&loaded);
+        return ELF32_ERR_EXEC_REPLACE;
+    }
+
+    /*
+     * The current process now owns loaded.cr3. The scheduler already
+     * switched to it and released the old process image.
+     */
+    loaded.cr3 = 0U;
     return ELF32_OK;
 }
 
@@ -947,6 +1230,10 @@ const char *elf32_status_string(int status) {
             return "failed to map userspace stack";
         case ELF32_ERR_TASK_CREATE:
             return "failed to create ELF userspace task";
+        case ELF32_ERR_STACK_ARGS:
+            return "arguments do not fit ELF startup stack";
+        case ELF32_ERR_EXEC_REPLACE:
+            return "failed to replace current process image";
         default:
             return "unknown ELF error";
     }
