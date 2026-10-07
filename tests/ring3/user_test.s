@@ -112,6 +112,27 @@ uaccess_test_done:
     jmp 1b
 
 
+.global user_fault_test_entry
+user_fault_test_entry:
+    # Announce the deliberate fault through the normal syscall path.
+    mov $1, %eax
+    mov $1, %ebx
+    mov $fault_test_message, %ecx
+    mov $(fault_test_message_end-fault_test_message), %edx
+    int $0x80
+
+    # Deliberate Ring 3 write to the unmapped null page.
+    movl $0xDEADBEEF, 0x00000000
+
+    # This path must never execute.
+    mov $2, %eax
+    mov $99, %ebx
+    int $0x80
+
+1:
+    jmp 1b
+
+
 .section .userdata, "aw", @progbits
 .align 16
 
@@ -124,6 +145,10 @@ user_stack_top:
 user_message:
     .ascii "Hello from ring 3\n"
 user_message_end:
+
+fault_test_message:
+    .ascii "ring3fault: touching null page\n"
+fault_test_message_end:
 
 uaccess_ok:
     .ascii "uaccess: kernel pointer rejected\n"
