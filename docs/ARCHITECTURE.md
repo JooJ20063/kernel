@@ -867,7 +867,7 @@ Validated capabilities include:
 
 Ring 0 faults remain kernel-fatal.
 
-The major remaining step is to stop linking test userspace into the kernel image and instead load external ELF executables into private process address spaces.
+The major remaining step is to stop linking test userspace into the kernel image and instead populate these private process address spaces from external ELF executables.
 
 ---
 
@@ -893,7 +893,13 @@ task_t
 └── FPU state
 ```
 
-For now, every process has exactly one task and all processes still use the shared kernel page-table context. The next process milestone is private address spaces and user stacks per process. Multiple tasks/threads inside one process can be added later without moving process-wide resources again.
+Every process still has exactly one task, but user processes now receive a private page directory and private page-table copies.
+
+Kernel mappings remain supervisor-only and reference the same physical kernel frames in every address space. The linked Ring 3 `.usertext` and `.userdata` sections are copied into private physical frames for each user process, so two processes may use the same virtual addresses without sharing writable userspace state.
+
+The scheduler switches `CR3` together with the task context. Kernel heap mappings are synchronized into all live address spaces so privilege transitions and kernel stacks remain valid across a context switch.
+
+Process model v1 currently allocates paging structures and copied userspace frames below 12 MiB so they remain reachable through the bootstrap identity mapping. A later temporary mapping window will remove that low-memory limitation.
 
 ---
 

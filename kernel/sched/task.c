@@ -2,6 +2,7 @@
 #include <arch/x86/fpu.h>
 #include <kernel/kmalloc.h>
 #include <kernel/vga.h>
+#include <kernel/vmm.h>
 #include <arch/x86/irq.h>
 #include <arch/x86/tss.h>
 
@@ -11,6 +12,11 @@
 #define KERNEL_DS           0x10U
 #define USER_CS             0x1BU
 #define USER_DS             0x23U
+
+extern uint8_t _user_text_start;
+extern uint8_t _user_text_end;
+extern uint8_t _user_data_start;
+extern uint8_t _user_data_end;
 
 static uint32_t quantum = 10; // Default quantum in ticks
 static uint32_t tick_acc = 0;
@@ -129,6 +135,15 @@ static void update_tss_for_task(task_t *task) {
     tss_set_kernel_stack(stack_top);
 }
 
+static void activate_task_address_space(task_t *task) {
+    if (task == 0 || task->process == 0) {
+        vmm_switch_address_space(vmm_kernel_cr3());
+        return;
+    }
+
+    vmm_switch_address_space(task->process->cr3);
+}
+
 static task_t *pic_next_ready(void) {
     if (current == 0) {
         return 0;
@@ -186,6 +201,11 @@ void sched_init(uint32_t quantum_ticks) {
     add_task(&idle_task);
 
     current = &idle_task;
+}
+
+void sched_set_bootstrap_address_space(uint32_t cr3) {
+    idle_process.cr3 =
+        (cr3 != 0U) ? cr3 : vmm_kernel_cr3();
 }
 
 void task_sleep_ticks(uint32_t ticks) {
@@ -516,6 +536,7 @@ registers_t *sched_tick_irq(registers_t *regs) {
     switches++;
 
     update_tss_for_task(next);
+    activate_task_address_space(next);
     fpu_set_ts();
 
     return next->context;
@@ -544,6 +565,7 @@ registers_t *sched_yield_irq(registers_t *regs) {
     switches++;
 
     update_tss_for_task(next);
+    activate_task_address_space(next);
     fpu_set_ts();
 
     return next->context;
@@ -584,7 +606,11 @@ int sched_create_kernel_task(const char *name, void (*entry)(void)) {
             ? current->process->pid
             : 0U;
 
-    process = process_create(name, parent_pid, 0U);
+    process = process_create(
+        name,
+        parent_pid,
+        vmm_kernel_cr3()
+    );
     if (process == 0) {
         kfree(stack);
         kfree(task);
@@ -631,6 +657,7 @@ int sched_create_user_task(
     registers_t *frame;
     process_t *process;
     uint32_t parent_pid;
+    uint32_t cr3;
     uintptr_t top;
 
     if (entry == 0 || user_stack_top == 0U) {
@@ -653,11 +680,35 @@ int sched_create_user_task(
             ? current->process->pid
             : 0U;
 
-    process = process_create(name, parent_pid, 0U);
-    if (process == 0) {
+    cr3 = vmm_create_address_space();
+    if (cr3 == 0U) {
         kfree(stack);
         kfree(task);
         return -4;
+    }
+
+    if (vmm_clone_user_range(
+            cr3,
+            (uintptr_t)&_user_text_start,
+            (uintptr_t)&_user_text_end,
+            VMM_PAGE_USER) != 0 ||
+        vmm_clone_user_range(
+            cr3,
+            (uintptr_t)&_user_data_start,
+            (uintptr_t)&_user_data_end,
+            VMM_PAGE_USER | VMM_PAGE_RW) != 0) {
+        vmm_destroy_address_space(cr3);
+        kfree(stack);
+        kfree(task);
+        return -5;
+    }
+
+    process = process_create(name, parent_pid, cr3);
+    if (process == 0) {
+        vmm_destroy_address_space(cr3);
+        kfree(stack);
+        kfree(task);
+        return -6;
     }
 
     mem_zero(task, sizeof(task_t));

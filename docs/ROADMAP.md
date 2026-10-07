@@ -36,15 +36,19 @@ Separação atual:
 - `task_t`: TID, contexto de CPU, kernel stack, estado de scheduler e FPU;
 - relação atual: 1 processo : 1 task.
 
-## 4. Address spaces privados — próximo bloco
+## 4. Address spaces privados — v1 concluído
 
-- page directory/CR3 efetivamente privado por processo;
-- mapeamento compartilhado do kernel + mappings privados de userspace;
-- user stack por processo;
-- ownership e destruição das páginas do processo;
-- preparação para `brk` e ELF.
+- page directory/CR3 privado por processo Ring 3;
+- mappings supervisor do kernel compartilhando frames físicos;
+- `.usertext` e `.userdata` clonados para frames privados;
+- user stack privada por processo;
+- troca de CR3 no context switch;
+- destruição do address space junto do processo;
+- sincronização dos mappings de heap do kernel.
 
-A FD table já pertence ao `process_t`.
+Limitação atual: estruturas de paginação e cópias do userspace usam frames abaixo de 12 MiB para permanecerem acessíveis pelo identity mapping bootstrap.
+
+Próximo passo: temporary mapping window / mapeamento de frames altos, seguido por `brk` e ELF.
 
 ## 5. ELF loader
 

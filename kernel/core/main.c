@@ -319,6 +319,7 @@ void kernel_main(uint32_t mb_info_addr) {
 
    pmm_init_from_multiboot(mb_info_addr, (uintptr_t)&_kernel_start, (uintptr_t)&_kernel_end);
    vmm_init();
+   sched_set_bootstrap_address_space(vmm_kernel_cr3());
    protect_kernel_ro_sections();
    map_user_sections();
    kmalloc_init();
