@@ -8,7 +8,7 @@
 #include <kernel/kmalloc.h>
 #include <kernel/panic.h>
 #include <kernel/klog.h>
-#include <kernel/shell.h>
+#include <kernel/ring0_shell.h>
 #include <kernel/ramfs.h>
 #include <kernel/devfs.h>
 #include <kernel/syscall.h>
@@ -353,7 +353,7 @@ void kernel_main(uint32_t mb_info_addr) {
 
    asm volatile ("sti");
 
-   shell_init();
+   ring0_shell_init();
 
    for(;;) {
        asm volatile ("hlt");
