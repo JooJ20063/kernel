@@ -642,6 +642,44 @@ static void shell_cmd_elfloadtest(const char *path) {
     vga_puts("\n");
 }
 
+static void shell_cmd_elfrun(const char *path) {
+    const char *target =
+        (path == 0 || *path == 0) ? "/bin/hello" : path;
+    fs_node_t *node = vfs_resolve(target);
+    uint32_t pid = 0U;
+    int status;
+
+    if (node == 0) {
+        klog_warn("elfrun: file not found");
+        return;
+    }
+
+    status = elf32_spawn(node, &pid);
+    if (status != ELF32_OK) {
+        vga_puts("elfrun: FAILED status=");
+        vga_putdec((uint32_t)(-status));
+        vga_puts(" reason=");
+        vga_puts(elf32_status_string(status));
+        vga_puts("\n");
+        return;
+    }
+
+    vga_puts("elfrun: ");
+    vga_puts(target);
+    vga_puts(" pid=");
+    vga_putdec(pid);
+    vga_puts(" entry scheduled in Ring 3\n");
+
+    /*
+     * Hand terminal input ownership to the launched process. The current
+     * hello test does not read stdin, but this gives ELF programs the same
+     * foreground semantics as the existing Ring 3 TTY tests. exit() returns
+     * focus to the kernel shell automatically.
+     */
+    tty1_flush_input();
+    tty1_set_foreground_pid(pid);
+}
+
 static void shell_cmd_cat(const char *name) {
     fs_node_t *entry;
 
@@ -1405,12 +1443,12 @@ static void ttyblock_waker_task(void) {
 
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
-        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest stdiotest ttyblocktest ttyfgtest ttycantest ttyfocus wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo elftest elfloadtest panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
+        vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest stdiotest ttyblocktest ttyfgtest ttycantest ttyfocus wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo elftest elfloadtest elfrun panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
         vga_puts("heap dbg: kmalloc <bytes> | kfree <slot> | krealloc <slot> <bytes> | kslots | kheapcheck\n");
-        vga_puts("elf: elftest [path] | elfloadtest [path] (default /bin/hello)\n");
+        vga_puts("elf: elftest [path] | elfloadtest [path] | elfrun [path] (default /bin/hello)\n");
     } else if (str_eq(cmd, "arch")) {
         if (sizeof(void*) == 8) {
             vga_puts("architecture: x86_64\n");
@@ -1539,6 +1577,10 @@ static void shell_run_command(const char *cmd) {
         shell_cmd_elfloadtest(0);
     } else if (str_starts(cmd, "elfloadtest ")) {
         shell_cmd_elfloadtest(skip_spaces(cmd + 12));
+    } else if (str_eq(cmd, "elfrun")) {
+        shell_cmd_elfrun(0);
+    } else if (str_starts(cmd, "elfrun ")) {
+        shell_cmd_elfrun(skip_spaces(cmd + 7));
     } else if (str_starts(cmd, "cat > ")) {
         uint32_t i = 6;
         uint32_t file_start = i;
