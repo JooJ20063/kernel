@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <arch/x86/regs.h>
+#include <kernel/fd.h>
 
 typedef enum task_state {
     TASK_UNUSED = 0,
@@ -36,6 +37,8 @@ typedef struct task_struct {
     uint8_t *fpu_storage;
     uint8_t *fpu_area;
     uint32_t fpu_initialized;
+
+    fd_table_t fds;
 
     struct task_struct *next; // Pointer to the next task in the task list
     struct task_struct *wait_next; // Pointer to the previous task in the task list
