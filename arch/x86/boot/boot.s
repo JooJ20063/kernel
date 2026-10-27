@@ -21,7 +21,6 @@ header_end:
 
 .section .text
 .global _start
-
 .extern kernel_main
 .extern gdt_descriptor
 
