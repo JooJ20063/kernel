@@ -9,6 +9,7 @@ iso/
 
 *.log
 *.map
+*.txt
 
 .DS_Store
 .vscode/
