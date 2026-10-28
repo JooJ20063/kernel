@@ -1,4 +1,5 @@
 #include <kernel/ring0_shell.h>
+#include "shell_internal.h"
 #include <kernel/vga.h>
 #include <kernel/klog.h>
 #include <kernel/pmm.h>
@@ -46,147 +47,6 @@ static char line[SHELL_BUF];
 static uint32_t line_len;
 static void *heap_slots[KHEAP_SLOTS];
 static uint32_t heap_slot_sizes[KHEAP_SLOTS];
-
-/* Comparação exata de duas strings de texto */
-static int str_eq(const char *a, const char *b) {
-    while (*a && *b) {
-        if (*a != *b) {
-            return 0;
-        }
-        a++;
-        b++;
-    }
-    return *a == *b;
-}
-
-/* Verifica se uma string inicia com um determinado prefixo */
-static int str_starts(const char *a, const char *prefix) {
-    while (*prefix) {
-        if (*a++ != *prefix++) {
-            return 0;
-        }
-    }
-    return 1;
-}
-
-/* Retorna o comprimento de uma string em bytes */
-static uint32_t str_len(const char *s) {
-    uint32_t n = 0;
-    while (s[n] != 0) {
-        n++;
-    }
-    return n;
-}
-
-/* Localiza a primeira ocorrência de uma sub-string dentro de um buffer de texto */
-static int str_find(const char *s, const char *pat) {
-    uint32_t i = 0;
-
-    if (pat[0] == 0) {
-        return 0;
-    }
-
-    while (s[i] != 0) {
-        uint32_t j = 0;
-        while (pat[j] != 0 && s[i + j] != 0 && s[i + j] == pat[j]) {
-            j++;
-        }
-
-        if (pat[j] == 0) {
-            return (int)i;
-        }
-
-        i++;
-    }
-
-    return -1;
-}
-
-/* Copia com segurança um intervalo delimitado de caracteres de uma string para um buffer de destino */
-static void str_copy_range(char *dst, uint32_t dst_cap, const char *src, uint32_t start, uint32_t end) {
-    uint32_t i = 0;
-
-    if (dst_cap == 0) {
-        return;
-    }
-
-    while ((start + i) < end && src[start + i] != 0 && i + 1U < dst_cap) {
-        dst[i] = src[start + i];
-        i++;
-    }
-
-    dst[i] = 0;
-}
-
-/* Converte uma string de dígitos decimais para um inteiro de 32 bits sem sinal */
-static uint32_t parse_u32(const char *s, int *ok) {
-    uint32_t v = 0;
-    *ok = 0;
-
-    if (*s == 0) {
-        return 0;
-    }
-
-    while (*s) {
-        if (*s < '0' || *s > '9') {
-            return 0;
-        }
-
-        v = (v * 10U) + (uint32_t)(*s - '0');
-        s++;
-    }
-
-    *ok = 1;
-    return v;
-}
-
-/* Identifica delimitadores de espaço em branco (espaço ou tabulação) */
-static int is_space(char c) {
-    return (c == ' ' || c == '\t');
-}
-
-/* Avanca o ponteiro de caractere pulando caracteres de espaço em branco */
-static const char *skip_spaces(const char *s) {
-    while (*s && is_space(*s)) {
-        s++;
-    }
-    return s;
-}
-
-/* Converte uma representação hexadecimal em string (ex: "0x1000") para uint32_t */
-static uint32_t parse_hex_u32(const char *s, int *ok) {
-    uint32_t v = 0;
-    *ok = 0;
-
-    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
-        s += 2;
-    }
-
-    if (*s == 0) {
-        return 0;
-    }
-
-    while (*s) {
-        char c = *s;
-        uint32_t d;
-
-        if (c >= '0' && c <= '9') {
-            d = (uint32_t)(c - '0');
-        } else if (c >= 'a' && c <= 'f') {
-            d = 10U + (uint32_t)(c - 'a');
-        } else if (c >= 'A' && c <= 'F') {
-            d = 10U + (uint32_t)(c - 'A');
-        } else {
-            return 0;
-        }
-
-        v = (v << 4) | d;
-        s++;
-    }
-
-    *ok = 1;
-    return v;
-}
 
 /* Exibe o prompt de comando no terminal VGA ($ ) com destaque em Ciano */
 static void shell_prompt(void) {
@@ -247,26 +107,26 @@ static void shell_cmd_pfault(const char *arg) {
         return;
     }
 
-    if (str_eq(arg, "null")) {
+    if (shell_str_eq(arg, "null")) {
         volatile uint32_t *p = (volatile uint32_t *)0x0;
         *p = 0xDEADBEEFU;
         return;
     }
 
-    if (str_eq(arg, "readonly")) {
+    if (shell_str_eq(arg, "readonly")) {
         extern uint8_t _rodata_start;
         volatile uint32_t *p = (volatile uint32_t *)&_rodata_start;
         *p = 0xCAFEBABEU;
         return;
     }
 
-    if (str_eq(arg, "invalid")) {
+    if (shell_str_eq(arg, "invalid")) {
         volatile uint32_t *p = (volatile uint32_t *)0xA000000U;
         *p = 0x12345678U;
         return;
     }
 
-    if (str_eq(arg, "stack")) {
+    if (shell_str_eq(arg, "stack")) {
         force_stack_overflow(0);
         return;
     }
@@ -281,30 +141,30 @@ static void shell_cmd_panic(const char *arg) {
         return;
     }
 
-    if (str_eq(arg, "int3")) {
+    if (shell_str_eq(arg, "int3")) {
         asm volatile ("int3");
         return;
     }
 
-    if (str_eq(arg, "ud2")) {
+    if (shell_str_eq(arg, "ud2")) {
         asm volatile ("ud2");
         return;
     }
 
-    if (str_eq(arg, "div0")) {
+    if (shell_str_eq(arg, "div0")) {
         klog_warn("div0: disabled - use 'panic ud2' or 'panic int3' instead");
         return;
     }
 
-    if (str_eq(arg, "null")) {
+    if (shell_str_eq(arg, "null")) {
         volatile uint32_t *pnull = (volatile uint32_t *)0x0;
         *pnull = 0xDEADBEEFU;
         return;
     }
 
-    if (str_starts(arg, "int ")) {
+    if (shell_str_starts(arg, "int ")) {
         int ok;
-        uint32_t int_no = parse_u32(arg + 4, &ok);
+        uint32_t int_no = shell_parse_u32(arg + 4, &ok);
         if (ok) {
             registers_t fake = {0};
             fake.int_no = int_no;
@@ -681,7 +541,7 @@ static void shell_write_text_file(const char *name, const char *text) {
         return;
     }
 
-    text_length = str_len(text);
+    text_length = shell_str_len(text);
     n = write_fs(entry, 0U, text_length, (const uint8_t *)text);
 
     if (n != text_length) {
@@ -747,7 +607,7 @@ static void shell_cmd_virt(const char *arg) {
         return;
     }
 
-    virt = (uintptr_t)parse_hex_u32(arg, &ok);
+    virt = (uintptr_t)shell_parse_hex_u32(arg, &ok);
     if (!ok) {
         klog_warn("endereco invalido");
         return;
@@ -776,7 +636,7 @@ static void shell_cmd_mapped(const char *arg) {
         return;
     }
 
-    virt = (uintptr_t)parse_hex_u32(arg, &ok);
+    virt = (uintptr_t)shell_parse_hex_u32(arg, &ok);
     if (!ok) {
         klog_warn("endereco invalido");
         return;
@@ -801,7 +661,7 @@ static void shell_cmd_unmap(const char *arg) {
         return;
     }
 
-    virt = (uintptr_t)parse_hex_u32(arg, &ok);
+    virt = (uintptr_t)shell_parse_hex_u32(arg, &ok);
     if (!ok) {
         klog_warn("endereco invalido");
         return;
@@ -853,7 +713,7 @@ static void shell_cmd_kmalloc_slot(const char *arg) {
         return;
     }
 
-    sz = parse_u32(arg, &ok);
+    sz = shell_parse_u32(arg, &ok);
     if (!ok || sz == 0) {
         klog_warn("usage: kmalloc <bytes>");
         return;
@@ -896,7 +756,7 @@ static void shell_cmd_kfree_slot(const char *arg) {
         return;
     }
 
-    slot = parse_u32(arg, &ok);
+    slot = shell_parse_u32(arg, &ok);
     if (!ok || slot >= KHEAP_SLOTS) {
         klog_warn("slot invalido");
         return;
@@ -944,15 +804,15 @@ static void shell_cmd_krealloc_slot(const char *arg) {
 
     {
         char slot_buf[16];
-        str_copy_range(slot_buf, sizeof(slot_buf), arg, 0, first_end);
-        slot = parse_u32(slot_buf, &ok_slot);
+        shell_str_copy_range(slot_buf, sizeof(slot_buf), arg, 0, first_end);
+        slot = shell_parse_u32(slot_buf, &ok_slot);
     }
 
     while (arg[i] == ' ') {
         i++;
     }
 
-    new_size = parse_u32(arg + i, &ok_size);
+    new_size = shell_parse_u32(arg + i, &ok_size);
 
     if (!ok_slot || !ok_size || slot >= KHEAP_SLOTS || new_size == 0) {
         klog_warn("usage: krealloc <slot> <bytes>");
@@ -1301,13 +1161,13 @@ static void shell_cmd_ttyfocus(const char *arg) {
         return;
     }
 
-    if (str_eq(arg, "shell")) {
+    if (shell_str_eq(arg, "shell")) {
         tty1_set_input_focus(TTY_INPUT_FOCUS_SHELL);
         vga_puts("ttyfocus: kernel shell\n");
         return;
     }
 
-    if (str_eq(arg, "tty1")) {
+    if (shell_str_eq(arg, "tty1")) {
         tty1_flush_input();
         tty1_set_input_focus(TTY_INPUT_FOCUS_TTY1);
         vga_puts("ttyfocus: /dev/tty1 owns input (F12 or Ctrl+] returns to kernel shell)\n");
@@ -1328,22 +1188,22 @@ static void ttyblock_waker_task(void) {
 
 /* Análise e despacho principal de comandos do Shell em Ring 0 */
 static void shell_run_command(const char *cmd) {
-    if (str_eq(cmd, "help")) {
+    if (shell_str_eq(cmd, "help")) {
         vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest stdiotest ttyblocktest ttyfgtest ttycantest ttyfocus wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo elftest elfloadtest elfrun panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
         vga_puts("panic modes: panic int3 | panic ud2 | panic div0(disabled) | panic null | panic int <n>\n");
         vga_puts("vmm dbg: virt <hex> | mapped <hex> | unmap <hex>\n");
         vga_puts("heap dbg: kmalloc <bytes> | kfree <slot> | krealloc <slot> <bytes> | kslots | kheapcheck\n");
         vga_puts("elf: elftest [path] | elfloadtest [path] | elfrun [path] (default /bin/hello)\n");
-    } else if (str_eq(cmd, "arch")) {
+    } else if (shell_str_eq(cmd, "arch")) {
         if (sizeof(void*) == 8) {
             vga_puts("architecture: x86_64\n");
         } else {
             vga_puts("architecture: x86_32\n");
         }
-    } else if (str_eq(cmd, "clear")) {
+    } else if (shell_str_eq(cmd, "clear")) {
         vga_clear();
-    } else if (str_eq(cmd, "ticks")) {
+    } else if (shell_str_eq(cmd, "ticks")) {
         vga_puts("ticks=");
         vga_putdec(irq_timer_ticks());
         vga_puts(" secs=");
@@ -1351,7 +1211,7 @@ static void shell_run_command(const char *cmd) {
         vga_puts(" hz=");
         vga_putdec(irq_timer_hz());
         vga_puts("\n");
-    } else if (str_eq(cmd, "task")) {
+    } else if (shell_str_eq(cmd, "task")) {
         vga_puts("current tid=");
         vga_putdec(sched_current_task());
 
@@ -1389,13 +1249,13 @@ static void shell_run_command(const char *cmd) {
         vga_putdec(sched_event_waker_counter());
 
         vga_puts("\n");
-    } else if (str_eq(cmd, "pmm")) {
+    } else if (shell_str_eq(cmd, "pmm")) {
         vga_puts("frames total=");
         vga_putdec(pmm_total_frame_count());
         vga_puts(" free=");
         vga_putdec(pmm_free_frame_count());
         vga_puts("\n");
-    } else if (str_eq(cmd, "vmm")) {
+    } else if (shell_str_eq(cmd, "vmm")) {
         vga_puts("paging=");
         vga_puts(vmm_is_enabled() ? "ON" : "OFF");
         vga_puts(" wp=");
@@ -1409,27 +1269,27 @@ static void shell_run_command(const char *cmd) {
         vga_puts(" temp=");
         vga_puts(vmm_temp_window_is_ready() ? "ON" : "OFF");
         vga_puts("\n");
-    } else if (str_eq(cmd, "tmptest")) {
+    } else if (shell_str_eq(cmd, "tmptest")) {
         shell_cmd_tmptest();
-    } else if (str_eq(cmd, "mounttest")) {
+    } else if (shell_str_eq(cmd, "mounttest")) {
         shell_cmd_mounttest();
-    } else if (str_eq(cmd, "devtest")) {
+    } else if (shell_str_eq(cmd, "devtest")) {
         shell_cmd_devtest();
-    } else if (str_eq(cmd, "ttytest")) {
+    } else if (shell_str_eq(cmd, "ttytest")) {
         shell_cmd_ttytest();
-    } else if (str_eq(cmd, "stdiotest")) {
+    } else if (shell_str_eq(cmd, "stdiotest")) {
         shell_cmd_stdiotest();
-    } else if (str_eq(cmd, "ttyfocus")) {
+    } else if (shell_str_eq(cmd, "ttyfocus")) {
         shell_cmd_ttyfocus(0);
-    } else if (str_starts(cmd, "ttyfocus ")) {
-        shell_cmd_ttyfocus(skip_spaces(cmd + 9));
-    } else if (str_eq(cmd, "wp")) {
+    } else if (shell_str_starts(cmd, "ttyfocus ")) {
+        shell_cmd_ttyfocus(shell_skip_spaces(cmd + 9));
+    } else if (shell_str_eq(cmd, "wp")) {
         vga_puts("CR0.WP=");
         vga_puts(vmm_wp_is_enabled() ? "ON" : "OFF");
         vga_puts("\n");
-    } else if (str_eq(cmd, "nullguard")) {
+    } else if (shell_str_eq(cmd, "nullguard")) {
         vga_puts("null-page guard ativo (0x0 sem mapeamento). Teste com: panic null\n");
-    } else if (str_eq(cmd, "kheap")) {
+    } else if (shell_str_eq(cmd, "kheap")) {
         vga_puts("kheap used=");
         vga_putdec(kmalloc_bytes_used());
         vga_puts(" free=");
@@ -1439,35 +1299,35 @@ static void shell_run_command(const char *cmd) {
         vga_puts(" blocks=");
         vga_putdec(kmalloc_block_count());
         vga_puts("\n");
-    } else if (str_eq(cmd, "kslots")) {
+    } else if (shell_str_eq(cmd, "kslots")) {
         shell_cmd_kslots();
-    } else if (str_starts(cmd, "kmalloc ")) {
-        shell_cmd_kmalloc_slot(skip_spaces(cmd + 8));
-    } else if (str_starts(cmd, "kfree ")) {
-        shell_cmd_kfree_slot(skip_spaces(cmd + 6));
-    } else if (str_starts(cmd, "krealloc ")) {
-        shell_cmd_krealloc_slot(skip_spaces(cmd + 9));
-    } else if (str_eq(cmd, "ls")) {
+    } else if (shell_str_starts(cmd, "kmalloc ")) {
+        shell_cmd_kmalloc_slot(shell_skip_spaces(cmd + 8));
+    } else if (shell_str_starts(cmd, "kfree ")) {
+        shell_cmd_kfree_slot(shell_skip_spaces(cmd + 6));
+    } else if (shell_str_starts(cmd, "krealloc ")) {
+        shell_cmd_krealloc_slot(shell_skip_spaces(cmd + 9));
+    } else if (shell_str_eq(cmd, "ls")) {
         shell_cmd_ls("/");
-    } else if (str_starts(cmd, "ls ")) {
-        shell_cmd_ls(skip_spaces(cmd + 3));
-    } else if (str_starts(cmd, "mkdir ")) {
-        shell_cmd_mkdir(skip_spaces(cmd + 6));
-    } else if (str_starts(cmd, "touch ")) {
+    } else if (shell_str_starts(cmd, "ls ")) {
+        shell_cmd_ls(shell_skip_spaces(cmd + 3));
+    } else if (shell_str_starts(cmd, "mkdir ")) {
+        shell_cmd_mkdir(shell_skip_spaces(cmd + 6));
+    } else if (shell_str_starts(cmd, "touch ")) {
         shell_cmd_touch(cmd + 6);
-    } else if (str_eq(cmd, "elftest")) {
+    } else if (shell_str_eq(cmd, "elftest")) {
         shell_cmd_elftest(0);
-    } else if (str_starts(cmd, "elftest ")) {
-        shell_cmd_elftest(skip_spaces(cmd + 8));
-    } else if (str_eq(cmd, "elfloadtest")) {
+    } else if (shell_str_starts(cmd, "elftest ")) {
+        shell_cmd_elftest(shell_skip_spaces(cmd + 8));
+    } else if (shell_str_eq(cmd, "elfloadtest")) {
         shell_cmd_elfloadtest(0);
-    } else if (str_starts(cmd, "elfloadtest ")) {
-        shell_cmd_elfloadtest(skip_spaces(cmd + 12));
-    } else if (str_eq(cmd, "elfrun")) {
+    } else if (shell_str_starts(cmd, "elfloadtest ")) {
+        shell_cmd_elfloadtest(shell_skip_spaces(cmd + 12));
+    } else if (shell_str_eq(cmd, "elfrun")) {
         shell_cmd_elfrun(0);
-    } else if (str_starts(cmd, "elfrun ")) {
-        shell_cmd_elfrun(skip_spaces(cmd + 7));
-    } else if (str_starts(cmd, "cat > ")) {
+    } else if (shell_str_starts(cmd, "elfrun ")) {
+        shell_cmd_elfrun(shell_skip_spaces(cmd + 7));
+    } else if (shell_str_starts(cmd, "cat > ")) {
         uint32_t i = 6;
         uint32_t file_start = i;
         char name[128];
@@ -1476,49 +1336,49 @@ static void shell_run_command(const char *cmd) {
             i++;
         }
 
-        str_copy_range(name, sizeof(name), cmd, file_start, i);
+        shell_str_copy_range(name, sizeof(name), cmd, file_start, i);
 
         if (cmd[i] == ' ') {
             i++;
         }
 
         shell_write_text_file(name, cmd + i);
-    } else if (str_starts(cmd, "cat ")) {
+    } else if (shell_str_starts(cmd, "cat ")) {
         shell_cmd_cat(cmd + 4);
-    } else if (str_starts(cmd, "echo ")) {
-        int sep = str_find(cmd + 5, " > ");
+    } else if (shell_str_starts(cmd, "echo ")) {
+        int sep = shell_str_find(cmd + 5, " > ");
 
         if (sep >= 0) {
             char text[128];
             char file[128];
             uint32_t base = 5U;
             uint32_t split = base + (uint32_t)sep;
-            uint32_t total = str_len(cmd);
+            uint32_t total = shell_str_len(cmd);
 
-            str_copy_range(text, sizeof(text), cmd, base, split);
-            str_copy_range(file, sizeof(file), cmd, split + 3U, total);
+            shell_str_copy_range(text, sizeof(text), cmd, base, split);
+            shell_str_copy_range(file, sizeof(file), cmd, split + 3U, total);
             shell_write_text_file(file, text);
         } else {
             vga_puts(cmd + 5);
             vga_puts("\n");
         }
-    } else if (str_starts(cmd, "virt ")) {
-        shell_cmd_virt(skip_spaces(cmd + 5));
-    } else if (str_starts(cmd, "mapped ")) {
-        shell_cmd_mapped(skip_spaces(cmd + 7));
-    } else if (str_starts(cmd, "unmap ")) {
-        shell_cmd_unmap(skip_spaces(cmd + 6));
-    } else if (str_eq(cmd, "panic") || str_starts(cmd, "panic ")) {
+    } else if (shell_str_starts(cmd, "virt ")) {
+        shell_cmd_virt(shell_skip_spaces(cmd + 5));
+    } else if (shell_str_starts(cmd, "mapped ")) {
+        shell_cmd_mapped(shell_skip_spaces(cmd + 7));
+    } else if (shell_str_starts(cmd, "unmap ")) {
+        shell_cmd_unmap(shell_skip_spaces(cmd + 6));
+    } else if (shell_str_eq(cmd, "panic") || shell_str_starts(cmd, "panic ")) {
         shell_cmd_panic(cmd[5] ? cmd + 6 : 0);
-    } else if (str_eq(cmd, "pfault") || str_starts(cmd, "pfault ")) {
-        shell_cmd_pfault(cmd[6] ? skip_spaces(cmd + 7) : 0);
-    } else if (str_eq(cmd, "kheapcheck")) {
+    } else if (shell_str_eq(cmd, "pfault") || shell_str_starts(cmd, "pfault ")) {
+        shell_cmd_pfault(cmd[6] ? shell_skip_spaces(cmd + 7) : 0);
+    } else if (shell_str_eq(cmd, "kheapcheck")) {
         vga_puts("kheapcheck=");
         vga_puts(kheap_check() ? "OK" : "CORRUPT");
         vga_puts("\n");
-    } else if (str_eq(cmd, "ps")) {
+    } else if (shell_str_eq(cmd, "ps")) {
         task_list_tasks();
-    } else if (str_eq(cmd, "shutdown")) {
+    } else if (shell_str_eq(cmd, "shutdown")) {
         vga_puts("Shutting down...\n");
 
         /* Envia o comando de desligamento para a porta ACPI do QEMU (0x604) */
@@ -1534,15 +1394,15 @@ static void shell_run_command(const char *cmd) {
         for (;;) {
             asm volatile ("hlt");
         }
-    } else if (str_eq(cmd, "schedtest")) {
+    } else if (shell_str_eq(cmd, "schedtest")) {
         sched_demo_init();
         vga_puts("scheduler tests started\n");
         return;
-    } else if (str_eq(cmd, "tss")) {
+    } else if (shell_str_eq(cmd, "tss")) {
         vga_puts("TR=");
         vga_puthex((uint32_t)tss_get_selector());
         vga_puts("\n");
-    } else if (str_eq(cmd, "syscalltest")) {
+    } else if (shell_str_eq(cmd, "syscalltest")) {
         uint32_t ret = syscall_test_write();
 
         vga_puts("return=");
@@ -1550,7 +1410,7 @@ static void shell_run_command(const char *cmd) {
         vga_puts("\n");
 
 #ifndef __x86_64__
-    } else if (str_eq(cmd, "ring3test")) {
+    } else if (shell_str_eq(cmd, "ring3test")) {
         int pid;
 
         pid = sched_create_user_task(
@@ -1567,7 +1427,7 @@ static void shell_run_command(const char *cmd) {
         vga_puts("Ring 3 task created pid=");
         vga_putdec((uint32_t)pid);
         vga_puts("\n");
-    } else if (str_eq(cmd, "ttyblocktest")) {
+    } else if (shell_str_eq(cmd, "ttyblocktest")) {
         int reader_pid;
         int waker_pid;
 
@@ -1606,7 +1466,7 @@ static void shell_run_command(const char *cmd) {
         vga_puts("\n");
 
         tty1_set_foreground_pid((uint32_t)reader_pid);
-    } else if (str_eq(cmd, "ttyfgtest")) {
+    } else if (shell_str_eq(cmd, "ttyfgtest")) {
         int reader_pid;
 
         tty1_set_mode(TTY_MODE_RAW);
@@ -1629,7 +1489,7 @@ static void shell_run_command(const char *cmd) {
         vga_puts(" - type any key (F12 aborts foreground ownership)\n");
 
         tty1_set_foreground_pid((uint32_t)reader_pid);
-    } else if (str_eq(cmd, "ttycantest")) {
+    } else if (shell_str_eq(cmd, "ttycantest")) {
         int reader_pid;
 
         tty1_set_mode(TTY_MODE_CANONICAL);
@@ -1653,7 +1513,7 @@ static void shell_run_command(const char *cmd) {
         vga_puts("ttycantest: expected final line is hello\\n\n");
 
         tty1_set_foreground_pid((uint32_t)reader_pid);
-    } else if (str_eq(cmd, "ring3fault")) {
+    } else if (shell_str_eq(cmd, "ring3fault")) {
         int pid;
 
         pid = sched_create_user_task(
@@ -1670,7 +1530,7 @@ static void shell_run_command(const char *cmd) {
         vga_puts("Ring 3 fault task created pid=");
         vga_putdec((uint32_t)pid);
         vga_puts("\n");
-    } else if (str_eq(cmd, "ring3ud")) {
+    } else if (shell_str_eq(cmd, "ring3ud")) {
         int pid = sched_create_user_task(
             "ring3-ud",
             user_ud_test_entry,
@@ -1685,7 +1545,7 @@ static void shell_run_command(const char *cmd) {
         vga_puts("Ring 3 UD task created pid=");
         vga_putdec((uint32_t)pid);
         vga_puts("\n");
-    } else if (str_eq(cmd, "ring3gp")) {
+    } else if (shell_str_eq(cmd, "ring3gp")) {
         int pid = sched_create_user_task(
             "ring3-gp",
             user_gp_test_entry,
@@ -1700,7 +1560,7 @@ static void shell_run_command(const char *cmd) {
         vga_puts("Ring 3 GP task created pid=");
         vga_putdec((uint32_t)pid);
         vga_puts("\n");
-    } else if (str_eq(cmd, "ring3as")) {
+    } else if (shell_str_eq(cmd, "ring3as")) {
         int first = sched_create_user_task(
             "ring3-as-a",
             user_aspace_test_entry,
@@ -1723,7 +1583,7 @@ static void shell_run_command(const char *cmd) {
         vga_putdec((uint32_t)second);
         vga_puts("\n");
 #endif
-    } else if (str_eq(cmd, "lastexit")) {
+    } else if (shell_str_eq(cmd, "lastexit")) {
         vga_puts("last exit: pid=");
         vga_putdec(sched_last_exit_pid());
 
@@ -1731,7 +1591,7 @@ static void shell_run_command(const char *cmd) {
         vga_putdec((uint32_t)sched_last_exit_code());
 
         vga_puts("\n");    
-    } else if (str_eq(cmd, "waittest")) {
+    } else if (shell_str_eq(cmd, "waittest")) {
         int32_t status = 0;
         int32_t pid = task_wait_child(&status);
 
