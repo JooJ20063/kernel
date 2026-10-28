@@ -24,4 +24,9 @@ void shell_cmd_touch(const char *name);
 void shell_cmd_mkdir(const char *path);
 void shell_write_text_file(const char *name, const char *text);
 
+/* Comandos de diagnostico ELF (privados ao monitor Ring 0). */
+void shell_cmd_elftest(const char *path);
+void shell_cmd_elfloadtest(const char *path);
+void shell_cmd_elfrun(const char *path);
+
 #endif
