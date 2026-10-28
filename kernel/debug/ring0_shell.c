@@ -512,43 +512,7 @@ static void shell_run_command(const char *cmd) {
         vga_putdec(irq_timer_hz());
         vga_puts("\n");
     } else if (shell_str_eq(cmd, "task")) {
-        vga_puts("current tid=");
-        vga_putdec(sched_current_task());
-
-        vga_puts(" pid=");
-        vga_putdec(sched_current_pid());
-
-        vga_puts(" tasks=");
-        vga_putdec(sched_task_count());
-
-        vga_puts(" switches=");
-        vga_putdec(sched_switch_count());
-
-        vga_puts(" demoA=\n");
-        vga_putdec(sched_demo_counter_a());
-
-        vga_puts(" demoB=");
-        vga_putdec(sched_demo_counter_b());
-
-        vga_puts(" sseA=");
-        vga_putdec((uint32_t)sched_sse_value_a());
-
-        vga_puts(" sseB=");
-        vga_putdec((uint32_t)sched_sse_value_b());
-
-        vga_puts(" sleep=");
-        vga_putdec(sched_sleep_demo_counter());
-
-        vga_puts(" evA=");
-        vga_putdec(sched_event_a_counter());
-
-        vga_puts(" evB=");
-        vga_putdec(sched_event_b_counter());
-
-        vga_puts(" wake=");
-        vga_putdec(sched_event_waker_counter());
-
-        vga_puts("\n");
+        shell_cmd_task();
     } else if (shell_str_eq(cmd, "pmm")) {
         vga_puts("frames total=");
         vga_putdec(pmm_total_frame_count());
@@ -677,7 +641,7 @@ static void shell_run_command(const char *cmd) {
         vga_puts(kheap_check() ? "OK" : "CORRUPT");
         vga_puts("\n");
     } else if (shell_str_eq(cmd, "ps")) {
-        task_list_tasks();
+        shell_cmd_ps();
     } else if (shell_str_eq(cmd, "shutdown")) {
         vga_puts("Shutting down...\n");
 
@@ -695,9 +659,7 @@ static void shell_run_command(const char *cmd) {
             asm volatile ("hlt");
         }
     } else if (shell_str_eq(cmd, "schedtest")) {
-        sched_demo_init();
-        vga_puts("scheduler tests started\n");
-        return;
+        shell_cmd_schedtest();
     } else if (shell_str_eq(cmd, "tss")) {
         vga_puts("TR=");
         vga_puthex((uint32_t)tss_get_selector());
@@ -884,28 +846,9 @@ static void shell_run_command(const char *cmd) {
         vga_puts("\n");
 #endif
     } else if (shell_str_eq(cmd, "lastexit")) {
-        vga_puts("last exit: pid=");
-        vga_putdec(sched_last_exit_pid());
-
-        vga_puts(" code=");
-        vga_putdec((uint32_t)sched_last_exit_code());
-
-        vga_puts("\n");    
+        shell_cmd_lastexit();
     } else if (shell_str_eq(cmd, "waittest")) {
-        int32_t status = 0;
-        int32_t pid = task_wait_child(&status);
-
-        if (pid < 0) {
-            vga_puts("wait: no zombie child\n");
-        } else {
-            vga_puts("wait: pid=");
-            vga_putdec((uint32_t)pid);
-
-            vga_puts(" code=");
-            vga_putdec((uint32_t)status);
-
-            vga_puts("\n");
-        }
+        shell_cmd_waittest();
     } else if (cmd[0] != 0) {
         klog_warn("unknown command");
     }

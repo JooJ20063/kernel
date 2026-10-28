@@ -41,4 +41,12 @@ void shell_cmd_krealloc_slot(const char *arg);
 void shell_cmd_tmptest(void);
 void shell_memory_init(void);
 
+
+/* Comandos de tarefas e scheduler (uso interno do monitor Ring 0). */
+void shell_cmd_task(void);
+void shell_cmd_ps(void);
+void shell_cmd_schedtest(void);
+void shell_cmd_lastexit(void);
+void shell_cmd_waittest(void);
+
 #endif
