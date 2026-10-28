@@ -1,28 +1,42 @@
+# Código de testes de usuário vinculado à imagem do kernel.
 .section .usertext, "ax", @progbits
 
+# Códigos positivos de erro; as syscalls retornam seus valores negativos.
 .set CZK_EBADF, 9
 .set CZK_ECHILD, 10
 .set CZK_EFAULT, 14
 .set CZK_ENOSYS, 38
 .set CZK_ESPIPE, 29
 
+# Flags de abertura de arquivos.
 .set CZK_O_RDONLY, 0x0000
 .set CZK_O_RDWR,   0x0002
 .set CZK_O_CREAT,  0x0040
 
+# Referência de deslocamento: início do arquivo.
 .set CZK_SEEK_SET, 0
-.global user_test_entry
 
+# ABI de syscall x86:
+#   EAX = número da chamada e valor de retorno
+#   EBX = argumento 1
+#   ECX = argumento 2
+#   EDX = argumento 3
+#
+# Chamadas utilizadas:
+#   1=write, 2=exit, 3=getpid, 4=yield, 5=getppid, 6=sleep,
+#   7=wait, 8=open, 9=read, 10=close, 11=lseek, 12=fstat, 13=readdir.
+
+.global user_test_entry
 user_test_entry:
-    # write("Hello from ring 3\n")
+    # Emite a mensagem inicial em stdout.
     mov $1, %eax
     mov $1, %ebx
     mov $user_message, %ecx
     mov $(user_message_end-user_message), %edx
     int $0x80
 
-    # Attempt to pass a kernel-only address to write().
-    # The kernel must reject it with -1 instead of faulting.
+    # Tenta escrever usando um endereço reservado ao kernel.
+    # A chamada deve retornar -EFAULT sem provocar falha no kernel.
     mov $1, %eax
     mov $1, %ebx
     mov $0x00100000, %ecx
@@ -47,8 +61,7 @@ uaccess_test_failed:
     int $0x80
 
 uaccess_test_done:
-
-    # Invalid fd must return -EBADF.
+    # Um descritor inválido deve produzir -EBADF.
     mov $1, %eax
     mov $99, %ebx
     mov $user_message, %ecx
@@ -58,7 +71,7 @@ uaccess_test_done:
     cmp $-CZK_EBADF, %eax
     jne abi_error_test_failed
 
-    # wait(NULL) with no child must return -ECHILD.
+    # Sem processos filhos, wait(NULL) deve retornar -ECHILD.
     mov $7, %eax
     xor %ebx, %ebx
     int $0x80
@@ -66,7 +79,7 @@ uaccess_test_done:
     cmp $-CZK_ECHILD, %eax
     jne abi_error_test_failed
 
-    # Unknown syscall must return -ENOSYS.
+    # Uma syscall desconhecida deve retornar -ENOSYS.
     mov $0x7FFFFFFF, %eax
     int $0x80
 
@@ -88,8 +101,7 @@ abi_error_test_failed:
     int $0x80
 
 abi_error_test_done:
-
-    # fd 2 is stderr and must be writable.
+    # O descritor 2 representa stderr e deve aceitar escrita.
     mov $1, %eax
     mov $2, %ebx
     mov $fd_stderr_message, %ecx
@@ -99,7 +111,7 @@ abi_error_test_done:
     cmp $(fd_stderr_message_end-fd_stderr_message), %eax
     jne fd_table_test_failed
 
-    # fd 0 is stdin and must reject write().
+    # O descritor 0 representa stdin e deve rejeitar escrita.
     mov $1, %eax
     xor %ebx, %ebx
     mov $user_message, %ecx
@@ -124,17 +136,17 @@ fd_table_test_failed:
     int $0x80
 
 fd_table_test_done:
-
-    # open("ring3.txt", O_CREAT | O_RDWR)
+    # Cria ou abre ring3.txt para leitura e escrita.
     mov $8, %eax
     mov $fileio_path, %ebx
     mov $(CZK_O_CREAT | CZK_O_RDWR), %ecx
     int $0x80
 
+    # Os descritores 0, 1 e 2 já estão reservados para stdio.
     cmp $3, %eax
     jl fileio_test_failed
 
-    # write(fd, payload, payload_len)
+    # Mantém o descritor em EBX para as operações seguintes.
     mov %eax, %ebx
     mov $1, %eax
     mov $fileio_payload, %ecx
@@ -144,14 +156,14 @@ fd_table_test_done:
     cmp $(fileio_payload_end-fileio_payload), %eax
     jne fileio_test_failed
 
-    # close(fd)
+    # Fecha o arquivo após a escrita.
     mov $10, %eax
     int $0x80
 
     test %eax, %eax
     jne fileio_test_failed
 
-    # reopen read-only
+    # Reabre o arquivo somente para leitura.
     mov $8, %eax
     mov $fileio_path, %ebx
     mov $CZK_O_RDONLY, %ecx
@@ -160,7 +172,8 @@ fd_table_test_done:
     cmp $3, %eax
     jl fileio_test_failed
 
-    # fstat(fd, &stat)
+    # Consulta os metadados e verifica o tamanho registrado.
+    # O primeiro campo da estrutura stat contém o tamanho do arquivo.
     mov %eax, %ebx
     mov $12, %eax
     mov $fileio_stat, %ecx
@@ -172,7 +185,7 @@ fd_table_test_done:
     cmpl $(fileio_payload_end-fileio_payload), fileio_stat
     jne fileio_test_failed
 
-    # read(fd, buffer, payload_len)
+    # Lê o conteúdo escrito anteriormente.
     mov $9, %eax
     mov $fileio_buffer, %ecx
     mov $(fileio_payload_end-fileio_payload), %edx
@@ -181,7 +194,8 @@ fd_table_test_done:
     cmp $(fileio_payload_end-fileio_payload), %eax
     jne fileio_test_failed
 
-    # Compare the bytes read back from RAMFS.
+    # Compara os bytes lidos do RAMFS com o conteúdo original.
+    # CLD garante avanço dos ponteiros nas instruções de string.
     cld
     mov $fileio_payload, %esi
     mov $fileio_buffer, %edi
@@ -189,7 +203,7 @@ fd_table_test_done:
     repe cmpsb
     jne fileio_test_failed
 
-    # lseek(fd, 4, SEEK_SET)
+    # Posiciona o cursor no byte 4 a partir do início do arquivo.
     mov $11, %eax
     mov $4, %ecx
     mov $CZK_SEEK_SET, %edx
@@ -198,7 +212,7 @@ fd_table_test_done:
     cmp $4, %eax
     jne fileio_test_failed
 
-    # Read a slice after seeking and compare it with payload + 4.
+    # Lê oito bytes a partir da nova posição.
     mov $9, %eax
     mov $fileio_seek_buffer, %ecx
     mov $8, %edx
@@ -207,6 +221,7 @@ fd_table_test_done:
     cmp $8, %eax
     jne fileio_test_failed
 
+    # Confere o trecho lido com os bytes correspondentes da origem.
     cld
     mov $(fileio_payload + 4), %esi
     mov $fileio_seek_buffer, %edi
@@ -214,7 +229,6 @@ fd_table_test_done:
     repe cmpsb
     jne fileio_test_failed
 
-    # close(fd)
     mov $10, %eax
     int $0x80
 
@@ -236,8 +250,7 @@ fileio_test_failed:
     int $0x80
 
 fileio_test_done:
-
-    # open("/", O_RDONLY)
+    # Abre o diretório raiz para enumeração.
     mov $8, %eax
     mov $root_path, %ebx
     mov $CZK_O_RDONLY, %ecx
@@ -249,19 +262,21 @@ fileio_test_done:
     mov %eax, %ebx
 
 dirent_scan_next:
-    # readdir(fd, &dirent)
+    # Obtém a próxima entrada do diretório.
     mov $13, %eax
     mov $dirent_buffer, %ecx
     int $0x80
 
-    # EOF before finding ring3.txt is a failure.
+    # Chegar ao fim antes de encontrar ring3.txt representa falha.
     test %eax, %eax
     jz dirent_test_failed
 
+    # O retorno 1 indica que uma entrada foi obtida.
     cmp $1, %eax
     jne dirent_test_failed
 
-    # Root now contains standard directories. Scan until ring3.txt is found.
+    # Compara o nome incluindo NUL: "ring3.txt" ocupa 10 bytes.
+    # Outras entradas da raiz são ignoradas.
     cld
     mov $fileio_path, %esi
     mov $dirent_buffer, %edi
@@ -269,14 +284,18 @@ dirent_scan_next:
     repe cmpsb
     jne dirent_scan_next
 
-    # d_flags must include FS_FILE and d_size must match the payload.
+    # Layout esperado de dirent:
+    #   bytes 0..127 = nome
+    #   offset 128   = flags
+    #   offset 132   = tamanho
+    # Confirma FS_FILE e o tamanho do conteúdo.
     testl $1, dirent_buffer+128
     jz dirent_test_failed
 
     cmpl $(fileio_payload_end-fileio_payload), dirent_buffer+132
     jne dirent_test_failed
 
-    # close(directory fd)
+    # Fecha o descritor do diretório.
     mov $10, %eax
     int $0x80
 
@@ -298,8 +317,8 @@ dirent_test_failed:
     int $0x80
 
 dirent_test_done:
-
-    # stdout is not seekable.
+    # stdout é um dispositivo sem suporte a reposicionamento.
+    # lseek deve retornar -ESPIPE.
     mov $11, %eax
     mov $1, %ebx
     xor %ecx, %ecx
@@ -324,93 +343,89 @@ seek_stdio_test_failed:
     int $0x80
 
 seek_stdio_test_done:
-
-    # getpid()
+    # Obtém o PID do processo atual.
     mov $3, %eax
     int $0x80
 
-    # EAX = PID
+    # Conversão simplificada: representa corretamente apenas PIDs de 0 a 9.
     add $'0', %al
     mov %al, user_pid_digit
 
-    # write("pid=")
     mov $1, %eax
     mov $1, %ebx
     mov $pid_message, %ecx
     mov $(pid_message_end-pid_message), %edx
     int $0x80
 
-    # write("Before sleep\n")
+    # Informa que o teste solicitará suspensão.
     mov $1, %eax
     mov $1, %ebx
     mov $before_sleep, %ecx
     mov $(before_sleep_end-before_sleep), %edx
     int $0x80
 
-    # sleep(300)
+    # Solicita suspensão por 300 ticks.
     mov $6, %eax
     mov $300, %ebx
     int $0x80
 
-    # write("After sleep\n")
     mov $1, %eax
     mov $1, %ebx
     mov $after_sleep, %ecx
     mov $(after_sleep_end-after_sleep), %edx
     int $0x80
 
-    # write "before yield\n"
+    # Marca o ponto anterior à cessão voluntária da CPU.
     mov $1, %eax
     mov $1, %ebx
     mov $before_yield, %ecx
     mov $(before_yield_end-before_yield), %edx
     int $0x80
 
-    # yield
     mov $4, %eax
     int $0x80
 
-    # write "after yield\n"
+    # Confirma que a execução foi retomada após yield.
     mov $1, %eax
     mov $1, %ebx
     mov $after_yield, %ecx
     mov $(after_yield_end-after_yield), %edx
     int $0x80
 
-    # getppid()
+    # Obtém o PID do processo pai.
     mov $5, %eax
     int $0x80
 
-    # EAX = PPID
+    # Mesma limitação da conversão simplificada do PID.
     add $'0', %al
     mov %al, user_ppid_digit
 
-    #write("ppid=")
     mov $1, %eax
     mov $1, %ebx
     mov $ppid_message, %ecx
     mov $(ppid_message_end-ppid_message), %edx
     int $0x80
 
-    # exit(42)
+    # Encerra o teste principal com status 42.
     mov $2, %eax
     mov $42, %ebx
     int $0x80
 
 1:
+    # Fallback caso exit retorne inesperadamente.
     jmp 1b
 
 
 .global user_tty_block_test_entry
 user_tty_block_test_entry:
-    # Announce before blocking on stdin.
+    # Anuncia a leitura que deverá bloquear enquanto não houver entrada.
     mov $1, %eax
     mov $1, %ebx
     mov $tty_block_waiting, %ecx
     mov $(tty_block_waiting_end-tty_block_waiting), %edx
     int $0x80
 
-    # read(0, &tty_block_byte, 1) must sleep until the waker injects input.
+    # Aguarda um byte em stdin, fornecido pelo mecanismo de teste.
     mov $9, %eax
     xor %ebx, %ebx
     mov $tty_block_byte, %ecx
@@ -429,6 +444,7 @@ user_tty_block_test_entry:
     mov $(tty_block_ok_end-tty_block_ok), %edx
     int $0x80
 
+    # Sucesso: exit(0).
     mov $2, %eax
     xor %ebx, %ebx
     int $0x80
@@ -440,6 +456,7 @@ tty_block_failed:
     mov $(tty_block_fail_end-tty_block_fail), %edx
     int $0x80
 
+    # Falha: exit(1).
     mov $2, %eax
     mov $1, %ebx
     int $0x80
@@ -450,7 +467,7 @@ tty_block_failed:
 
 .global user_tty_foreground_test_entry
 user_tty_foreground_test_entry:
-    # Manual foreground test: any single input byte is valid.
+    # Teste manual de leitura em foreground: aceita qualquer byte.
     mov $1, %eax
     mov $1, %ebx
     mov $tty_fg_waiting, %ecx
@@ -466,6 +483,7 @@ user_tty_foreground_test_entry:
     cmp $1, %eax
     jne tty_fg_failed
 
+    # Exibe o byte recebido entre prefixo e sufixo.
     mov $1, %eax
     mov $1, %ebx
     mov $tty_fg_prefix, %ecx
@@ -505,7 +523,8 @@ tty_fg_failed:
 
 .global user_tty_canonical_test_entry
 user_tty_canonical_test_entry:
-    # Canonical read must not return until Enter commits the line.
+    # Em modo canônico, a leitura aguarda o fechamento da linha com Enter.
+    # O conteúdo esperado é "hello\n", totalizando seis bytes.
     mov $1, %eax
     mov $1, %ebx
     mov $tty_canon_waiting, %ecx
@@ -561,14 +580,18 @@ tty_canon_failed:
 
 .global user_ud_test_entry
 user_ud_test_entry:
+    # Anuncia a geração deliberada de uma exceção #UD.
     mov $1, %eax
     mov $1, %ebx
     mov $ud_test_message, %ecx
     mov $(ud_test_message_end-ud_test_message), %edx
     int $0x80
 
+    # UD2 gera uma exceção de instrução inválida.
+    # O kernel deve encerrar o processo sem derrubar o sistema.
     ud2
 
+    # Status sentinela: este caminho não deve ser alcançado.
     mov $2, %eax
     mov $98, %ebx
     int $0x80
@@ -579,14 +602,17 @@ user_ud_test_entry:
 
 .global user_gp_test_entry
 user_gp_test_entry:
+    # Anuncia a tentativa de executar uma instrução privilegiada.
     mov $1, %eax
     mov $1, %ebx
     mov $gp_test_message, %ecx
     mov $(gp_test_message_end-gp_test_message), %edx
     int $0x80
 
+    # Com CPL=3 e IOPL inferior a 3, CLI deve gerar #GP.
     cli
 
+    # Status sentinela: indica que a proteção esperada não interrompeu o fluxo.
     mov $2, %eax
     mov $97, %ebx
     int $0x80
@@ -597,9 +623,11 @@ user_gp_test_entry:
 
 .global user_aspace_test_entry
 user_aspace_test_entry:
+    # Cada nova instância deve receber sua própria cópia inicialmente zerada.
     cmpl $0, aspace_private_word
     jne aspace_test_failed
 
+    # Modifica o dado privado desta instância.
     movl $0xA5A5A5A5, aspace_private_word
 
     mov $1, %eax
@@ -629,17 +657,18 @@ aspace_test_failed:
 
 .global user_fault_test_entry
 user_fault_test_entry:
-    # Announce the deliberate fault through the normal syscall path.
+    # Anuncia o acesso inválido pelo caminho normal de syscall.
     mov $1, %eax
     mov $1, %ebx
     mov $fault_test_message, %ecx
     mov $(fault_test_message_end-fault_test_message), %edx
     int $0x80
 
-    # Deliberate Ring 3 write to the unmapped null page.
+    # Escrita deliberada na página nula, que deve estar desmapeada.
+    # Espera-se #PF e encerramento apenas do processo responsável.
     movl $0xDEADBEEF, 0x00000000
 
-    # This path must never execute.
+    # Status sentinela: este caminho não deve ser alcançado.
     mov $2, %eax
     mov $99, %ebx
     int $0x80
@@ -648,15 +677,18 @@ user_fault_test_entry:
     jmp 1b
 
 
+# Dados graváveis utilizados pelos testes vinculados ao kernel.
 .section .userdata, "aw", @progbits
 .align 16
 
+# Mensagem exportada para o teste de syscall chamado pelo kernel.
 .global syscall_test_message
 .global syscall_test_message_end
 syscall_test_message:
     .ascii "hello from int 0x80\n"
 syscall_test_message_end:
 
+# Reserva de 4 KiB para a pilha de usuário.
 .align 16
 user_stack_bottom:
     .skip 4096
@@ -664,6 +696,7 @@ user_stack_bottom:
 .global user_stack_top
 user_stack_top:
 
+# Mensagens sem NUL: o comprimento é calculado pela diferença entre labels.
 user_message:
     .ascii "Hello from ring 3\n"
 user_message_end:
@@ -688,6 +721,7 @@ aspace_fail_message:
     .ascii "aspace: private userdata FAILED\n"
 aspace_fail_message_end:
 
+# Palavra modificada pelo teste de isolamento dos espaços de endereçamento.
 .align 4
 aspace_private_word:
     .long 0
@@ -766,10 +800,12 @@ tty_canon_fail:
     .ascii "ttycanon: FAILED\n"
 tty_canon_fail_end:
 
+# Buffer de recepção do teste de leitura canônica.
 .align 16
 tty_canon_buffer:
     .skip 32
 
+# Caminhos fornecidos às syscalls precisam de terminação NUL.
 fileio_path:
     .asciz "ring3.txt"
 
@@ -804,6 +840,7 @@ dirent_fail_end:
 root_path:
     .asciz "/"
 
+# Buffers dimensionados conforme os layouts atuais da UAPI x86.
 .align 16
 dirent_buffer:
     .skip 136
@@ -820,6 +857,7 @@ fileio_stat:
 fileio_seek_buffer:
     .skip 16
 
+# As mensagens reservam somente um caractere para representar PID e PPID.
 pid_message:
     .ascii "pid="
 user_pid_digit:
@@ -837,6 +875,7 @@ ppid_message_end:
 before_yield:
     .ascii "before yield\n"
 before_yield_end:
+
 after_yield:
     .ascii "after yield\n"
 after_yield_end:
@@ -844,8 +883,10 @@ after_yield_end:
 before_sleep:
     .ascii "Before sleep\n"
 before_sleep_end:
+
 after_sleep:
     .ascii "After sleep\n"
 after_sleep_end:
 
+# Marca este objeto como não exigindo uma pilha executável.
 .section .note.GNU-stack,"",@progbits
