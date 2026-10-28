@@ -16,4 +16,12 @@ uint32_t shell_parse_hex_u32(const char *s, int *ok);
 
 const char *shell_skip_spaces(const char *s);
 
+
+/* Comandos internos do monitor Ring 0: filesystem. */
+void shell_cmd_ls(const char *path);
+void shell_cmd_cat(const char *name);
+void shell_cmd_touch(const char *name);
+void shell_cmd_mkdir(const char *path);
+void shell_write_text_file(const char *name, const char *text);
+
 #endif
