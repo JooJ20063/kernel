@@ -29,4 +29,16 @@ void shell_cmd_elftest(const char *path);
 void shell_cmd_elfloadtest(const char *path);
 void shell_cmd_elfrun(const char *path);
 
+
+/* Comandos de diagnostico de memoria (internos ao shell Ring 0). */
+void shell_cmd_virt(const char *arg);
+void shell_cmd_mapped(const char *arg);
+void shell_cmd_unmap(const char *arg);
+void shell_cmd_kslots(void);
+void shell_cmd_kmalloc_slot(const char *arg);
+void shell_cmd_kfree_slot(const char *arg);
+void shell_cmd_krealloc_slot(const char *arg);
+void shell_cmd_tmptest(void);
+void shell_memory_init(void);
+
 #endif
