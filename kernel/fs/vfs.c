@@ -1,16 +1,20 @@
 #include <kernel/vfs.h>
 
+/* Limite máximo de pontos de montagem simultâneos suportados pela tabela interna do VFS */
 #define VFS_MAX_MOUNTS 16U
 
+/* Estrutura de mapeamento para pontos de montagem (Mount Points) */
 struct vfs_mount {
-    fs_node_t *mountpoint;
-    fs_node_t *root;
+    fs_node_t *mountpoint; // Nó original do VFS sobre o qual o sistema foi montado
+    fs_node_t *root;       // Nó raiz do novo sistema de arquivos montado
 };
 
+/* Estado global da tabela de montagem do VFS e nó raiz principal ("/") */
 static fs_node_t *vfs_root_node;
 static struct vfs_mount vfs_mounts[VFS_MAX_MOUNTS];
 static uint32_t vfs_mounts_used;
 
+/* Comparação exata de duas strings de texto */
 static int str_eq(const char *a, const char *b) {
     while (*a != 0 && *b != 0) {
         if (*a != *b) {
@@ -22,6 +26,7 @@ static int str_eq(const char *a, const char *b) {
     return *a == *b;
 }
 
+/* Extrai o próximo componente delimitado por barras ('/') na string de caminho */
 static int vfs_next_component(
     const char **cursor,
     char component[VFS_NAME_MAX]
@@ -56,6 +61,10 @@ static int vfs_next_component(
     return 1;
 }
 
+/**
+ * Segue recursivamente a cadeia de pontos de montagem para um dado nó VFS.
+ * Previne loops infinitos limitando a resolução ao número máximo de montagens (VFS_MAX_MOUNTS).
+ */
 static fs_node_t *vfs_follow_mount(fs_node_t *node) {
     uint32_t hops = 0U;
 
@@ -81,6 +90,11 @@ static fs_node_t *vfs_follow_mount(fs_node_t *node) {
     return hops < VFS_MAX_MOUNTS ? node : 0;
 }
 
+/**
+ * Resolução interna de caminho (path lookup).
+ * Varre componente por componente a partir do nó raiz, resolvendo redirecionamentos de montagem.
+ * A flag 'follow_final_mount' indica se o nó final deve retornar a raiz do sistema montado ou o nó de montagem base.
+ */
 static fs_node_t *vfs_resolve_internal(
     const char *path,
     uint8_t follow_final_mount
@@ -126,6 +140,8 @@ static fs_node_t *vfs_resolve_internal(
         }
     }
 }
+
+/* Invocadores de abstração da VTable (fs_node_t ops) */
 
 uint32_t read_fs(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
     if (node == 0 || node->read == 0) {
@@ -181,6 +197,7 @@ int remove_fs(fs_node_t *node, const char *name) {
     return node->remove(node, name);
 }
 
+/* Configura o nó raiz global do VFS ("/") e limpa os pontos de montagem existentes */
 void vfs_set_root(fs_node_t *root) {
     vfs_root_node = root;
     vfs_mounts_used = 0U;
@@ -191,14 +208,17 @@ void vfs_set_root(fs_node_t *root) {
     }
 }
 
+/* Retorna o nó raiz efetivo do VFS (resolvendo se houver montagem sobre o nó raiz) */
 fs_node_t *vfs_root(void) {
     return vfs_follow_mount(vfs_root_node);
 }
 
+/* Resolve uma string de caminho completa e retorna o nó VFS correspondente */
 fs_node_t *vfs_resolve(const char *path) {
     return vfs_resolve_internal(path, 1U);
 }
 
+/* Decompõe um caminho em nó do diretório pai e nome do elemento final */
 static int vfs_resolve_parent(
     const char *path,
     fs_node_t **parent_out,
@@ -226,6 +246,7 @@ static int vfs_resolve_parent(
             after++;
         }
 
+        /* Se for o último componente do caminho, extrai o nó pai e o nome do arquivo/diretório */
         if (*after == 0) {
             uint32_t i = 0U;
 
@@ -268,6 +289,7 @@ static int vfs_resolve_parent(
     }
 }
 
+/* Cria um novo arquivo ou diretório no VFS no caminho especificado caso ainda não exista */
 fs_node_t *vfs_create(const char *path, uint32_t flags) {
     fs_node_t *existing;
     fs_node_t *parent;
@@ -278,6 +300,7 @@ fs_node_t *vfs_create(const char *path, uint32_t flags) {
         return 0;
     }
 
+    /* Se o arquivo/diretório já existir e for do mesmo tipo, retorna a instância ativa */
     existing = vfs_resolve(path);
     if (existing != 0) {
         if ((existing->flags & type) == 0U) {
@@ -297,6 +320,7 @@ fs_node_t *vfs_create(const char *path, uint32_t flags) {
     return create_fs(parent, name, flags);
 }
 
+/* Remove um arquivo ou diretório do VFS no caminho informado */
 int vfs_remove(const char *path) {
     fs_node_t *parent;
     fs_node_t *target;
@@ -311,6 +335,7 @@ int vfs_remove(const char *path) {
         return -2;
     }
 
+    /* Impede a remoção de um nó que atue como ponto de montagem ou raiz de um FS montado */
     for (uint32_t i = 0U; i < VFS_MAX_MOUNTS; ++i) {
         if (vfs_mounts[i].mountpoint == target ||
             vfs_mounts[i].root == target) {
@@ -321,6 +346,10 @@ int vfs_remove(const char *path) {
     return remove_fs(parent, name);
 }
 
+/**
+ * Monta a raiz de um sistema de arquivos ('root') sobre o caminho do diretório 'path'.
+ * Registra o vínculo na tabela 'vfs_mounts'.
+ */
 int vfs_mount(const char *path, fs_node_t *root) {
     fs_node_t *mountpoint;
     uint32_t free_slot = VFS_MAX_MOUNTS;
@@ -337,6 +366,7 @@ int vfs_mount(const char *path, fs_node_t *root) {
         return -2;
     }
 
+    /* Localiza um slot livre e verifica se o nó já não está atuando como ponto de montagem */
     for (uint32_t i = 0U; i < VFS_MAX_MOUNTS; ++i) {
         if (vfs_mounts[i].mountpoint == mountpoint) {
             return -3;
@@ -349,13 +379,14 @@ int vfs_mount(const char *path, fs_node_t *root) {
     }
 
     if (free_slot == VFS_MAX_MOUNTS) {
-        return -4;
+        return -4; // Tabela de montagem cheia
     }
 
     vfs_mounts[free_slot].mountpoint = mountpoint;
     vfs_mounts[free_slot].root = root;
     vfs_mounts_used++;
 
+    /* Valida se o encadeamento não causou um ciclo de montagem circular */
     if (vfs_follow_mount(mountpoint) == 0) {
         vfs_mounts[free_slot].mountpoint = 0;
         vfs_mounts[free_slot].root = 0;
@@ -366,6 +397,7 @@ int vfs_mount(const char *path, fs_node_t *root) {
     return 0;
 }
 
+/* Desmonta o sistema de arquivos associado ao ponto de montagem em 'path' */
 int vfs_unmount(const char *path) {
     fs_node_t *mountpoint;
 
@@ -394,6 +426,7 @@ int vfs_unmount(const char *path) {
     return -3;
 }
 
+/* Retorna a quantidade de sistemas de arquivos ativos montados no VFS */
 uint32_t vfs_mount_count(void) {
     return vfs_mounts_used;
 }

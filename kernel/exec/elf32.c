@@ -7,13 +7,16 @@
 #define ELF32_USER_STACK_PAGES 4U
 #define ELF32_USER_STACK_TOP VMM_USER_MAX_ADDR
 
+/* Validação em tempo de compilação do tamanho dos cabeçalhos da especificação ELF32 */
 _Static_assert(sizeof(elf32_ehdr_t) == 52U, "ELF32 header size mismatch");
 _Static_assert(sizeof(elf32_phdr_t) == 32U, "ELF32 program header size mismatch");
 
+/* Verifica se o alinhamento informado é uma potência de 2 */
 static int elf32_is_power_of_two(uint32_t value) {
     return value != 0U && (value & (value - 1U)) == 0U;
 }
 
+/* Leitura direta da tabela de cabeçalhos de programa sem revalidação completa do cabeçalho ELF */
 static int elf32_read_program_header_unchecked(
     fs_node_t *node,
     const elf32_ehdr_t *header,
@@ -41,6 +44,7 @@ static int elf32_read_program_header_unchecked(
     return ELF32_OK;
 }
 
+/* Valida tamanhos, limites no arquivo, estouro de endereços e regras de alinhamento de um segmento */
 static int elf32_validate_load_segment(
     const elf32_phdr_t *program_header,
     uint32_t file_size,
@@ -72,6 +76,7 @@ static int elf32_validate_load_segment(
 
         align_mask = program_header->p_align - 1U;
 
+        /* Exigência ELF: vaddr e offset devem ter o mesmo resto do alinhamento */
         if ((program_header->p_vaddr & align_mask) !=
             (program_header->p_offset & align_mask)) {
             return ELF32_ERR_SEGMENT_ALIGN;
@@ -92,6 +97,7 @@ static uint32_t elf32_min_u32(uint32_t a, uint32_t b) {
     return (a < b) ? a : b;
 }
 
+/* Valida se o segmento de carga reside estritamente dentro da janela de User Space (Ring 3) */
 static int elf32_validate_user_load_range(
     const elf32_phdr_t *program_header,
     uint32_t *page_start_out,
@@ -123,6 +129,7 @@ static int elf32_validate_user_load_range(
         return ELF32_ERR_SEGMENT_USER_RANGE;
     }
 
+    /* Arredonda os limites do segmento para o tamanho de página de 4KB */
     page_start =
         program_header->p_vaddr &
         ~(uint32_t)(VMM_PAGE_SIZE - 1U);
@@ -148,6 +155,7 @@ static int elf32_validate_user_load_range(
     return ELF32_OK;
 }
 
+/* Aloca e mapeia frames de memória no VMM para suportar as páginas do segmento de carga */
 static int elf32_map_load_segment_pages(
     uint32_t cr3,
     const elf32_phdr_t *program_header,
@@ -171,6 +179,7 @@ static int elf32_map_load_segment_pages(
         return ELF32_OK;
     }
 
+    /* Configura flag R/W de página se o segmento possuir permissão de escrita (ELF32_PF_W) */
     map_flags =
         ((program_header->p_flags & ELF32_PF_W) != 0U)
             ? VMM_PAGE_RW
@@ -220,6 +229,7 @@ static int elf32_map_load_segment_pages(
                 return ELF32_ERR_ADDRESS_CONFLICT;
             }
 
+            /* Atualiza a permissão para R/W se um novo segmento sobreposto exigir escrita */
             if ((map_flags & VMM_PAGE_RW) != 0U &&
                 (current_flags & VMM_PAGE_RW) == 0U) {
                 if (vmm_set_user_page_flags(
@@ -235,6 +245,7 @@ static int elf32_map_load_segment_pages(
     return ELF32_OK;
 }
 
+/* Copia o conteúdo bruto do arquivo ELF para as páginas do espaço virtual de usuário */
 static int elf32_copy_virtual_range(
     fs_node_t *node,
     uint32_t cr3,
@@ -289,6 +300,7 @@ static int elf32_copy_virtual_range(
     return ELF32_OK;
 }
 
+/* Preenche com zeros o restante do segmento reservado em memória (ex: seção .bss) */
 static int elf32_zero_virtual_range(
     uint32_t cr3,
     uint32_t virt_addr,
@@ -321,6 +333,7 @@ static int elf32_zero_virtual_range(
     return ELF32_OK;
 }
 
+/* Popula o segmento de carga na memória virtual copiando os bytes e zerando a área .bss */
 static int elf32_populate_load_segment(
     fs_node_t *node,
     uint32_t cr3,
@@ -341,6 +354,7 @@ static int elf32_populate_load_segment(
         }
     }
 
+    /* Zera a diferença entre o tamanho na memória (p_memsz) e no arquivo (p_filesz) */
     if (program_header->p_memsz > program_header->p_filesz) {
         status = elf32_zero_virtual_range(
             cr3,
@@ -357,6 +371,7 @@ static int elf32_populate_load_segment(
     return ELF32_OK;
 }
 
+/* Valida a assinatura de magic bytes, classe 32-bit, arquitetura i386 e campos do cabeçalho ELF */
 int elf32_validate_header(
     const elf32_ehdr_t *header,
     uint32_t file_size
@@ -371,6 +386,7 @@ int elf32_validate_header(
         return ELF32_ERR_TOO_SMALL;
     }
 
+    /* Valida os bytes mágicos "\x7FELF" */
     if (header->e_ident[ELF32_EI_MAG0] != ELF32_MAG0 ||
         header->e_ident[ELF32_EI_MAG1] != ELF32_MAG1 ||
         header->e_ident[ELF32_EI_MAG2] != ELF32_MAG2 ||
@@ -429,6 +445,7 @@ int elf32_validate_header(
     return ELF32_OK;
 }
 
+/* Lê e valida o cabeçalho principal do arquivo ELF32 */
 int elf32_read_header(
     fs_node_t *node,
     elf32_ehdr_t *header_out
@@ -465,6 +482,7 @@ int elf32_read_header(
     return elf32_validate_header(header_out, node->size);
 }
 
+/* Lê um cabeçalho de programa específico (p_hdr) por índice com validações completas */
 int elf32_read_program_header(
     fs_node_t *node,
     const elf32_ehdr_t *header,
@@ -504,6 +522,7 @@ int elf32_read_program_header(
     );
 }
 
+/* Varre a tabela de cabeçalhos de programa para calcular os limites virtuais e verificar compatibilidade */
 int elf32_validate_program_headers(
     fs_node_t *node,
     const elf32_ehdr_t *header,
@@ -550,6 +569,7 @@ int elf32_validate_program_headers(
             return status;
         }
 
+        /* Rejeita binários que exijam vinculação dinâmica (PT_INTERP ou PT_DYNAMIC) */
         if (program_header.p_type == ELF32_PT_INTERP) {
             return ELF32_ERR_INTERP_UNSUPPORTED;
         }
@@ -586,6 +606,7 @@ int elf32_validate_program_headers(
 
             image.load_segment_count++;
 
+            /* Valida se o ponto de entrada (e_entry) reside dentro de um segmento executável */
             if ((program_header.p_flags & ELF32_PF_X) != 0U &&
                 header->e_entry >= program_header.p_vaddr &&
                 header->e_entry < segment_end) {
@@ -606,6 +627,7 @@ int elf32_validate_program_headers(
     return ELF32_OK;
 }
 
+/* Inspeciona e valida o executável ELF32 preenchendo as informações de limites da imagem */
 int elf32_inspect(
     fs_node_t *node,
     elf32_ehdr_t *header_out,
@@ -629,6 +651,7 @@ int elf32_inspect(
     );
 }
 
+/* Cria um novo espaço de endereçamento (CR3) e carrega todos os segmentos PT_LOAD na memória virtual */
 int elf32_load_image(
     fs_node_t *node,
     elf32_loaded_image_t *loaded_out
@@ -688,6 +711,7 @@ int elf32_load_image(
     loaded.load_segment_count = image.load_segment_count;
     loaded.mapped_page_count = 0U;
 
+    /* Passo 1: Mapeia as páginas e atribui permissões no VMM */
     for (uint32_t i = 0U;
          i < (uint32_t)header.e_phnum;
          ++i) {
@@ -718,6 +742,7 @@ int elf32_load_image(
         }
     }
 
+    /* Passo 2: Popula o conteúdo das páginas a partir do arquivo VFS */
     for (uint32_t i = 0U;
          i < (uint32_t)header.e_phnum;
          ++i) {
@@ -756,6 +781,7 @@ fail:
     return status;
 }
 
+/* Auxiliar para escrita direta em um endereço virtual pertencente a outro CR3 */
 static int elf32_write_user_virtual(
     uint32_t cr3,
     uintptr_t virt_addr,
@@ -795,6 +821,7 @@ static int elf32_write_user_virtual(
     return ELF32_OK;
 }
 
+/* Calcula o tamanho de uma string terminada em nulo limitando ao tamanho máximo do argumento */
 static int elf32_string_size(
     const char *value,
     uint32_t *size_out
@@ -815,6 +842,7 @@ static int elf32_string_size(
     return ELF32_ERR_STACK_ARGS;
 }
 
+/* Empurra um valor inteiro de 32 bits (4 bytes) para a pilha de usuário */
 static int elf32_push_u32(
     uint32_t cr3,
     uintptr_t stack_bottom,
@@ -841,6 +869,7 @@ static int elf32_push_u32(
     return ELF32_OK;
 }
 
+/* Aloca e mapeia as páginas dedicadas para a pilha de Ring 3 do processo */
 static int elf32_map_user_stack(
     uint32_t cr3,
     uintptr_t *stack_top_out
@@ -891,6 +920,19 @@ static int elf32_map_user_stack(
     return ELF32_OK;
 }
 
+/**
+ * Constrói o layout de pilha padrão System V ABI x86 para inicialização do executável:
+ * High Memory
+ *   [strings envp]
+ *   [strings argv]
+ *   [alinhamento a 4 bytes]
+ *   [NULL pointer (fim do envp)]
+ *   [ponteiros envp[n]...]
+ *   [NULL pointer (fim do argv)]
+ *   [ponteiros argv[n]...]
+ *   [argc]
+ * Low Memory (ESP)
+ */
 static int elf32_build_initial_stack(
     uint32_t cr3,
     const char *const argv[],
@@ -924,6 +966,7 @@ static int elf32_build_initial_stack(
         (ELF32_USER_STACK_PAGES * VMM_PAGE_SIZE);
     sp = stack_top;
 
+    /* Escreve os bytes das strings de variáveis de ambiente */
     for (uint32_t i = envc; i > 0U; --i) {
         uint32_t index = i - 1U;
         uint32_t string_size;
@@ -952,6 +995,7 @@ static int elf32_build_initial_stack(
         envp_addrs[index] = (uint32_t)sp;
     }
 
+    /* Escreve os bytes das strings dos argumentos de linha de comando */
     for (uint32_t i = argc; i > 0U; --i) {
         uint32_t index = i - 1U;
         uint32_t string_size;
@@ -980,8 +1024,10 @@ static int elf32_build_initial_stack(
         argv_addrs[index] = (uint32_t)sp;
     }
 
+    /* Alinha o ponteiro de pilha em limites de 4 bytes */
     sp &= ~(uintptr_t)0x3U;
 
+    /* Empurra o arranjo de ponteiros de envp, argv e argc */
     status = elf32_push_u32(cr3, stack_bottom, &sp, 0U);
     if (status != ELF32_OK) {
         return status;
@@ -1030,6 +1076,7 @@ static int elf32_build_initial_stack(
     return ELF32_OK;
 }
 
+/* Cria um novo processo de usuário em Ring 3 a partir de um arquivo executável ELF32 */
 int elf32_spawn(
     fs_node_t *node,
     uint32_t *pid_out
@@ -1076,15 +1123,13 @@ int elf32_spawn(
         return ELF32_ERR_TASK_CREATE;
     }
 
-    /*
-     * Ownership of the address space now belongs to process_t and will be
-     * released by process_destroy() after the task becomes reapable.
-     */
+    /* A posse do CR3 foi transferida com sucesso para o processo recém-criado */
     loaded.cr3 = 0U;
     *pid_out = (uint32_t)pid;
     return ELF32_OK;
 }
 
+/* Substitui a imagem do processo em execução por um novo programa ELF32 (execve) */
 int elf32_exec_current(
     fs_node_t *node,
     const char *const argv[],
@@ -1129,14 +1174,12 @@ int elf32_exec_current(
         return ELF32_ERR_EXEC_REPLACE;
     }
 
-    /*
-     * The current process now owns loaded.cr3. The scheduler already
-     * switched to it and released the old process image.
-     */
+    /* A posse do novo CR3 foi assumida com sucesso pelo escalonador */
     loaded.cr3 = 0U;
     return ELF32_OK;
 }
 
+/* Destrói o espaço de endereçamento e descarta as estruturas da imagem ELF carregada */
 void elf32_unload_image(elf32_loaded_image_t *loaded) {
     if (loaded == 0) {
         return;
@@ -1154,6 +1197,7 @@ void elf32_unload_image(elf32_loaded_image_t *loaded) {
     loaded->mapped_page_count = 0U;
 }
 
+/* Traduz códigos de erro numéricos do subsistema ELF32 para mensagens de texto legíveis */
 const char *elf32_status_string(int status) {
     switch (status) {
         case ELF32_OK:

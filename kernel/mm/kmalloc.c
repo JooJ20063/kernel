@@ -3,52 +3,65 @@
 #include <kernel/vmm.h>
 #include <kernel/klog.h>
 
+/* Constantes de alinhamento, tamanho de página e limites do Heap do Kernel */
 #define KMALLOC_ALIGN        16U
 #define KMALLOC_PAGE_SIZE    4096U
 #define KMALLOC_HEAP_START   0x00C00000U
 #define KMALLOC_HEAP_END     0x01000000U
 #define KMALLOC_MIN_SPLIT    32U
 
+/* Marcadores de integridade e poison bytes para detecção de corrupção/uso de memória livre */
 #define KMALLOC_MAGIC        0x4B484541U
 #define KMALLOC_POISON_ALLOC 0xCDU
 #define KMALLOC_POISON_FREE  0xDDU
 
+/**
+ * Cabeçalho de metadados para cada bloco de memória alocado/livre no Heap.
+ */
 typedef struct kmalloc_block {
-    uint32_t magic;
-    uint32_t size;
-    uint8_t free;
-    uint8_t _pad[3];
-    struct kmalloc_block *next;
-    struct kmalloc_block *prev;
+    uint32_t magic;             // Marcador Mágico de validação (KMALLOC_MAGIC)
+    uint32_t size;              // Tamanho do payload do bloco (excluindo o cabeçalho)
+    uint8_t free;               // Flag de estado: 1 para livre, 0 para ocupado
+    uint8_t _pad[3];            // Padding explícito para manter alinhamento de 32 bits
+    struct kmalloc_block *next; // Próximo bloco na lista duplamente encadeada
+    struct kmalloc_block *prev; // Bloco anterior na lista duplamente encadeada
 } kmalloc_block_t;
 
+/* Limite atual de páginas mapeadas e ponteiro inicial do heap */
 static uintptr_t heap_limit;
 static kmalloc_block_t *heap_head;
 
+/* Arredonda um valor para cima para o múltiplo de alinhamento especificado */
 static uint32_t align_up(uint32_t value, uint32_t align) {
     return (value + align - 1U) & ~(align - 1U);
 }
 
+/* Avança um ponteiro por um deslocamento em bytes */
 static uint8_t *ptr_add(void *ptr, uint32_t off) {
     return (uint8_t *)((uintptr_t)ptr + (uintptr_t)off);
 }
 
+/* Retorna o tamanho em bytes do cabeçalho de metadados de um bloco */
 static uint32_t block_overhead(void) {
     return (uint32_t)sizeof(kmalloc_block_t);
 }
 
+/* Copia memória byte a byte entre áreas do kernel */
 static void mem_copy(uint8_t *dst, const uint8_t *src, uint32_t size) {
     for (uint32_t i = 0; i < size; ++i) dst[i] = src[i];
 }
 
+/* Preenche uma região de memória com um determinado byte (poisoning/zeroing) */
 static void mem_fill(uint8_t *dst, uint8_t value, uint32_t size) {
     for (uint32_t i = 0; i < size; ++i) dst[i] = value;
 }
 
+/* Zera uma região de memória */
 static void mem_zero(uint8_t *dst, uint32_t size) {
     mem_fill(dst, 0U, size);
 }
 
+/* Inicializa os campos do cabeçalho de um novo bloco de memória */
 static void block_init(kmalloc_block_t *blk, uint32_t size, uint8_t free) {
     blk->magic = KMALLOC_MAGIC;
     blk->size = size;
@@ -58,6 +71,7 @@ static void block_init(kmalloc_block_t *blk, uint32_t size, uint8_t free) {
     blk->prev = 0;
 }
 
+/* Verifica se um ponteiro aponta para um bloco válido no intervalo do heap e sem corrupção de magic */
 static uint8_t block_is_valid(const kmalloc_block_t *blk) {
     uintptr_t addr;
 
@@ -73,15 +87,18 @@ static uint8_t block_is_valid(const kmalloc_block_t *blk) {
     return 1;
 }
 
+/* Retorna o endereço do payload útil logo após o cabeçalho do bloco */
 static void *block_payload(kmalloc_block_t *blk) {
     return (void *)ptr_add(blk, block_overhead());
 }
 
+/* Calcula o ponteiro do cabeçalho do bloco a partir de um ponteiro de payload */
 static kmalloc_block_t *payload_to_block(void *ptr) {
     if (!ptr) return 0;
     return (kmalloc_block_t *)((uintptr_t)ptr - block_overhead());
 }
 
+/* Varre a lista até encontrar o último bloco do heap */
 static kmalloc_block_t *find_last_block(void) {
     kmalloc_block_t *cur = heap_head;
     if (!cur) return 0;
@@ -94,6 +111,7 @@ static kmalloc_block_t *find_last_block(void) {
     return block_is_valid(cur) ? cur : 0;
 }
 
+/* Busca o primeiro bloco livre com tamanho suficiente (First-Fit) */
 static kmalloc_block_t *find_first_fit(uint32_t size) {
     kmalloc_block_t *cur = heap_head;
 
@@ -106,6 +124,7 @@ static kmalloc_block_t *find_first_fit(uint32_t size) {
     return 0;
 }
 
+/* Divide um bloco em dois caso o sobra do tamanho exceda o overhead e a sobra mínima */
 static void split_block(kmalloc_block_t *blk, uint32_t wanted_size) {
     if (!blk || !block_is_valid(blk) || blk->size < wanted_size) return;
 
@@ -128,6 +147,7 @@ static void split_block(kmalloc_block_t *blk, uint32_t wanted_size) {
     mem_fill((uint8_t *)block_payload(new_blk), KMALLOC_POISON_FREE, new_blk->size);
 }
 
+/* Funde um bloco com o seu sucessor caso este também esteja livre */
 static void coalesce_forward(kmalloc_block_t *blk) {
     while (blk && blk->next && blk->next->free) {
         kmalloc_block_t *next = blk->next;
@@ -141,6 +161,7 @@ static void coalesce_forward(kmalloc_block_t *blk) {
     }
 }
 
+/* Tenta realizar a fusão de blocos livres antes e depois do bloco especificado */
 static kmalloc_block_t *coalesce_around(kmalloc_block_t *blk) {
     if (!blk || !block_is_valid(blk)) return 0;
 
@@ -154,11 +175,12 @@ static kmalloc_block_t *coalesce_around(kmalloc_block_t *blk) {
     return blk;
 }
 
+/* Requisita novos frames ao PMM e realiza o mapeamento no VMM para expandir o limite do Heap */
 static int map_heap_pages(uint32_t bytes_needed) {
     uintptr_t new_limit = heap_limit;
     uintptr_t end_needed = heap_limit + bytes_needed;
 
-    if (end_needed > KMALLOC_HEAP_END) return -1;
+    if (end_needed > KMALLOC_HEAP_END) return -1; // Ultrapassa o limite do Heap do Kernel
 
     while (new_limit < end_needed) {
         uint32_t frame = pmm_alloc_frame();
@@ -177,9 +199,11 @@ static int map_heap_pages(uint32_t bytes_needed) {
     return 0;
 }
 
+/* Expande o limite do heap mapeando novas páginas para acomodar uma nova alocação */
 static kmalloc_block_t *grow_heap(uint32_t wanted_size) {
     kmalloc_block_t *last = find_last_block();
 
+    /* Se o último bloco do heap estiver livre, expande ele em vez de criar um novo */
     if (last && last->free) {
         if (last->size < wanted_size) {
             uint32_t missing = wanted_size - last->size;
@@ -214,11 +238,16 @@ static kmalloc_block_t *grow_heap(uint32_t wanted_size) {
     return new_blk;
 }
 
+/* Inicializa o subsistema de alocação de memória virtual do Kernel */
 void kmalloc_init(void) {
     heap_limit = KMALLOC_HEAP_START;
     heap_head = 0;
 }
 
+/**
+ * Aloca um bloco contíguo de memória de no mínimo 'size' bytes.
+ * Garante alinhamento a 16 bytes e preenche a área com o padrão KMALLOC_POISON_ALLOC (0xCD).
+ */
 void *kmalloc(uint32_t size) {
     if (!size) return 0;
 
@@ -238,6 +267,10 @@ void *kmalloc(uint32_t size) {
     return block_payload(blk);
 }
 
+/**
+ * Libera um bloco de memória alocado anteriormente por kmalloc.
+ * Preenche a área liberada com KMALLOC_POISON_FREE (0xDD) e realiza fusão com vizinhos livres.
+ */
 void kfree(void *ptr) {
     if (!ptr) return;
 
@@ -256,6 +289,10 @@ void kfree(void *ptr) {
     coalesce_around(blk);
 }
 
+/**
+ * Redimensiona uma alocação de memória existente para um novo tamanho.
+ * Tenta reaproveitar o bloco atual ou realizar fusão com o bloco seguinte antes de realocar.
+ */
 void *krealloc(void *ptr, uint32_t size) {
     if (!ptr) return kmalloc(size);
     if (!size) { kfree(ptr); return 0; }
@@ -271,6 +308,7 @@ void *krealloc(void *ptr, uint32_t size) {
         return ptr;
     }
 
+    /* Tenta expandir no próprio local caso o próximo bloco esteja livre */
     if (blk->next && blk->next->free &&
         (blk->size + block_overhead() + blk->next->size) >= aligned) {
         coalesce_forward(blk);
@@ -288,6 +326,7 @@ void *krealloc(void *ptr, uint32_t size) {
     return new_ptr;
 }
 
+/* Retorna o total de bytes ocupados por blocos ativos (excluindo overhead) */
 uint32_t kmalloc_bytes_used(void) {
     uint32_t total = 0;
     for (kmalloc_block_t *cur = heap_head; cur; cur = cur->next)
@@ -295,6 +334,7 @@ uint32_t kmalloc_bytes_used(void) {
     return total;
 }
 
+/* Retorna o total de bytes livres disponíveis nos blocos do heap */
 uint32_t kmalloc_bytes_free(void) {
     uint32_t total = 0;
     for (kmalloc_block_t *cur = heap_head; cur; cur = cur->next)
@@ -302,10 +342,12 @@ uint32_t kmalloc_bytes_free(void) {
     return total;
 }
 
+/* Retorna o tamanho total mapeado do Heap em memória virtual */
 uint32_t kmalloc_bytes_mapped(void) {
     return heap_limit - KMALLOC_HEAP_START;
 }
 
+/* Retorna o número de blocos (livres e ocupados) na lista do heap */
 uint32_t kmalloc_block_count(void) {
     uint32_t count = 0;
     for (kmalloc_block_t *cur = heap_head; cur; cur = cur->next)
@@ -313,6 +355,7 @@ uint32_t kmalloc_block_count(void) {
     return count;
 }
 
+/* Valida a consistência estrutural e integridade dos ponteiros de toda a cadeia do heap */
 uint8_t kheap_check(void) {
     kmalloc_block_t *prev = 0;
 

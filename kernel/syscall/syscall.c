@@ -13,10 +13,12 @@
 #include <czk/stat.h>
 #include <czk/dirent.h>
 
+/* Converte um código de erro positivo para o padrão de retorno negativo de syscalls (-ERRNO) */
 static uint32_t syscall_error(uint32_t error_number) {
     return (uint32_t)(-(int32_t)error_number);
 }
 
+/* Estrutura de buffer intermediário para cópia segura de vetores de argumentos (argv/envp) no execve */
 typedef struct execve_copy {
     const char *argv[ELF32_EXEC_MAX_ARGS];
     const char *envp[ELF32_EXEC_MAX_ENVS];
@@ -26,6 +28,7 @@ typedef struct execve_copy {
     uint32_t envc;
 } execve_copy_t;
 
+/* Copia um vetor de ponteiros para strings do espaço de usuário para buffers alocados no kernel */
 static int syscall_copy_string_vector(
     uintptr_t user_vector,
     char storage[][ELF32_EXEC_MAX_STRING],
@@ -82,6 +85,7 @@ static int syscall_copy_string_vector(
     return -3;
 }
 
+/* Mapeia erros internos do carregador ELF32 para códigos de erro padrão czk_errno */
 static uint32_t syscall_execve_error(int elf_status) {
     switch (elf_status) {
         case ELF32_ERR_NO_MEMORY:
@@ -98,6 +102,7 @@ static uint32_t syscall_execve_error(int elf_status) {
     }
 }
 
+/* Preenche uma estrutura czk_dirent_t a partir de um nó VFS (fs_node_t) */
 static void syscall_dirent_from_node(
     czk_dirent_t *dirent,
     const fs_node_t *node
@@ -120,6 +125,7 @@ static void syscall_dirent_from_node(
     dirent->d_size = node->size;
 }
 
+/* Traduz as flags de fcntl/open (O_RDONLY, O_WRONLY, O_RDWR) para as máscaras internas do gerenciador de FDs */
 static int syscall_open_access(uint32_t flags, uint32_t *access_out) {
     uint32_t mode;
 
@@ -151,6 +157,10 @@ static int syscall_open_access(uint32_t flags, uint32_t *access_out) {
     }
 }
 
+/**
+ * Handler principal de chamadas de sistema (despachado pela INT $0x80).
+ * Lê o número do serviço no registrador EAX e os argumentos em EBX, ECX, EDX.
+ */
 registers_t *syscall_handler(registers_t *regs) {
     if (regs == 0) {
         return regs;
@@ -171,11 +181,7 @@ registers_t *syscall_handler(registers_t *regs) {
                 break;
             }
 
-            /*
-             * Validate the whole userspace range before producing output.
-             * This prevents a write from partially succeeding and then
-             * discovering that a later page is not accessible to Ring 3.
-             */
+            /* Valida todo o buffer de usuário antes de iniciar a escrita parcial no arquivo/dispositivo */
             if (!user_ptr_valid(buf, len, 0)) {
                 regs->eax = syscall_error(CZK_EFAULT);
                 break;
@@ -224,13 +230,12 @@ registers_t *syscall_handler(registers_t *regs) {
             __builtin_unreachable();
         
         case SYS_GETPID:
-        regs->eax = sched_current_pid();
-        break;
+            regs->eax = sched_current_pid();
+            break;
 
         case SYS_YIELD:
             return sched_yield_irq(regs);
 
-        
         case SYS_GETPPID:
             regs->eax = sched_current_ppid();
             break;
@@ -249,11 +254,7 @@ registers_t *syscall_handler(registers_t *regs) {
             int32_t status = 0;
             int32_t pid;
 
-            /*
-             * Validate the userspace destination before reaping the child.
-             * A bad status pointer must not consume a zombie process.
-             * A null pointer is valid and behaves like wait(NULL).
-             */
+            /* Valida o ponteiro de saída do status de encerramento antes de destruir o filho ZOMBIE */
             if (user_status != 0 &&
                 !user_ptr_valid(user_status, sizeof(status), 1)) {
                 regs->eax = syscall_error(CZK_EFAULT);
@@ -591,10 +592,7 @@ registers_t *syscall_handler(registers_t *regs) {
                 break;
             }
 
-            /*
-             * Success never returns to the old image: regs now describes
-             * the new ELF entry point and the scheduler has switched CR3.
-             */
+            /* Em caso de sucesso, o contexto e o CR3 do processo são substituídos e a execução salta para o novo ELF */
             return regs;
         }
 
@@ -651,6 +649,7 @@ registers_t *syscall_handler(registers_t *regs) {
     return regs;
 }
 
+/* Função de teste para emissão direta de syscall de escrita via int $0x80 */
 uint32_t syscall_test_write(void) {
     extern uint8_t syscall_test_message;
     extern uint8_t syscall_test_message_end;

@@ -1,42 +1,54 @@
 #include <kernel/ramfs.h>
 #include <kernel/kmalloc.h>
 
+/* Tamanho do bloco padrão da especificação do formato TAR (512 bytes) */
 #define TAR_BLOCK_SIZE 512U
+
+/* Capacidade inicial em bytes para novos arquivos criados dinamicamente no RAMFS */
 #define RAMFS_NEW_FILE_CAPACITY 256U
 
+/**
+ * Layout do cabeçalho de um arquivo dentro de um arquivo de arquivo TAR (POSIX ustar).
+ */
 struct tar_header {
-    char name[100];
-    char mode[8];
-    char uid[8];
-    char gid[8];
-    char size[12];
-    char mtime[12];
-    char checksum[8];
-    char typeflag;
-    char linkname[100];
-    char magic[6];
-    char version[2];
-    char uname[32];
-    char gname[32];
-    char devmajor[8];
-    char devminor[8];
-    char prefix[155];
-    char pad[12];
+    char name[100];     // Nome ou caminho do arquivo
+    char mode[8];       // Permissões em Octal
+    char uid[8];        // User ID em Octal
+    char gid[8];        // Group ID em Octal
+    char size[12];      // Tamanho do arquivo em bytes (Octal)
+    char mtime[12];     // Data de modificação (Octal)
+    char checksum[8];   // Checksum do cabeçalho
+    char typeflag;      // Tipo de entrada ('0': Arquivo normal, '5': Diretório)
+    char linkname[100]; // Nome do link simbólico/hardlink
+    char magic[6];      // Assinatura "ustar"
+    char version[2];    // Versão do formato ustar
+    char uname[32];     // Nome do usuário
+    char gname[32];     // Nome do grupo
+    char devmajor[8];   // Dispositivo Major
+    char devminor[8];   // Dispositivo Minor
+    char prefix[155];   // Prefixo do caminho longo
+    char pad[12];       // Padding para alinhar a 512 bytes
 };
 
+/**
+ * Estrutura privada estendida de um nó do RAMFS (armazenada em fs_node_t.device).
+ * Mantém os ponteiros da árvore hierárquica (filhos/irmãos) e o buffer de dados.
+ */
 struct ramfs_entry {
-    fs_node_t node;
-    uintptr_t data_ptr;
-    uint32_t capacity;
-    uint8_t writable;
-    struct ramfs_entry *parent;
-    struct ramfs_entry *first_child;
-    struct ramfs_entry *last_child;
-    struct ramfs_entry *next_sibling;
+    fs_node_t node;                  // Nó genérico do VFS
+    uintptr_t data_ptr;             // Ponteiro para o buffer de conteúdo do arquivo em RAM
+    uint32_t capacity;              // Capacidade total alocada do buffer em bytes
+    uint8_t writable;               // Flag indicando se é dinâmico/gravável (1) ou Read-Only no TAR (0)
+    struct ramfs_entry *parent;       // Ponteiro para o nó diretório pai
+    struct ramfs_entry *first_child;  // Primeiro nó filho (se for diretório)
+    struct ramfs_entry *last_child;   // Último nó filho (se for diretório)
+    struct ramfs_entry *next_sibling; // Próximo nó no mesmo nível de diretório
 };
 
+/* Instância estática da raiz do RAMFS ("/") */
 static struct ramfs_entry ramfs_root_entry;
 
+/* Protótipos das funções do VFS para o RAMFS */
 static uint32_t ramfs_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer);
 static uint32_t ramfs_write(fs_node_t *node, uint32_t offset, uint32_t size, const uint8_t *buffer);
 static fs_node_t *ramfs_readdir(fs_node_t *node, uint32_t index);
@@ -44,18 +56,21 @@ static fs_node_t *ramfs_finddir(fs_node_t *node, const char *name);
 static fs_node_t *ramfs_create(fs_node_t *node, const char *name, uint32_t flags);
 static int ramfs_remove(fs_node_t *node, const char *name);
 
+/* Preenche um buffer de memória com zeros */
 static void mem_zero(uint8_t *dst, uint32_t size) {
     for (uint32_t i = 0U; i < size; ++i) {
         dst[i] = 0U;
     }
 }
 
+/* Copia 'size' bytes do buffer de origem para o destino */
 static void mem_copy(uint8_t *dst, const uint8_t *src, uint32_t size) {
     for (uint32_t i = 0U; i < size; ++i) {
         dst[i] = src[i];
     }
 }
 
+/* Comparação exata de duas strings de texto */
 static int str_eq(const char *a, const char *b) {
     while (*a != 0 && *b != 0) {
         if (*a != *b) {
@@ -67,6 +82,7 @@ static int str_eq(const char *a, const char *b) {
     return *a == *b;
 }
 
+/* Retorna a quantidade de caracteres em uma string */
 static uint32_t str_len(const char *s) {
     uint32_t n = 0U;
     while (s[n] != 0) {
@@ -75,6 +91,7 @@ static uint32_t str_len(const char *s) {
     return n;
 }
 
+/* Copia uma string limitando ao número máximo de caracteres informados */
 static void str_copy_limit(char *dst, const char *src, uint32_t limit) {
     uint32_t i = 0U;
 
@@ -90,6 +107,7 @@ static void str_copy_limit(char *dst, const char *src, uint32_t limit) {
     dst[i] = 0;
 }
 
+/* Copia o nome de uma entrada TAR para o nó VFS respeitando o limite VFS_NAME_MAX */
 static void tar_name_copy(char dst[VFS_NAME_MAX], const char *src, uint32_t src_limit) {
     uint32_t i = 0U;
 
@@ -101,6 +119,7 @@ static void tar_name_copy(char dst[VFS_NAME_MAX], const char *src, uint32_t src_
     dst[i] = 0;
 }
 
+/* Converte uma representação em texto Octal (usada nos cabeçalhos TAR) para um inteiro de 32 bits */
 static uint32_t oct_to_u32(const char *oct, uint32_t len) {
     uint32_t out = 0U;
 
@@ -121,6 +140,7 @@ static uint32_t oct_to_u32(const char *oct, uint32_t len) {
     return out;
 }
 
+/* Verifica se um bloco de 512 bytes contém apenas zeros (marcação de fim do arquivo TAR) */
 static uint8_t tar_is_zero_block(const uint8_t *blk) {
     for (uint32_t i = 0U; i < TAR_BLOCK_SIZE; ++i) {
         if (blk[i] != 0U) {
@@ -130,6 +150,7 @@ static uint8_t tar_is_zero_block(const uint8_t *blk) {
     return 1U;
 }
 
+/* Extrai o próximo componente delimitado por barra ('/') de uma string de caminho */
 static int path_next_component(const char **cursor, char component[VFS_NAME_MAX]) {
     const char *p;
     uint32_t length = 0U;
@@ -161,6 +182,7 @@ static int path_next_component(const char **cursor, char component[VFS_NAME_MAX]
     return 1;
 }
 
+/* Recupera o ponteiro da estrutura ramfs_entry_t a partir do nó VFS (fs_node_t) */
 static struct ramfs_entry *ramfs_entry_from_node(fs_node_t *node) {
     if (node == 0 || node->device == 0) {
         return 0;
@@ -168,6 +190,7 @@ static struct ramfs_entry *ramfs_entry_from_node(fs_node_t *node) {
     return (struct ramfs_entry *)node->device;
 }
 
+/* Busca um nó filho com um nome específico dentro da lista de um nó diretório pai */
 static struct ramfs_entry *ramfs_find_child_entry(struct ramfs_entry *parent, const char *name) {
     struct ramfs_entry *cur;
 
@@ -186,6 +209,7 @@ static struct ramfs_entry *ramfs_find_child_entry(struct ramfs_entry *parent, co
     return 0;
 }
 
+/* Insere um novo nó filho no final da lista encadeada do nó diretório pai */
 static void ramfs_link_child(struct ramfs_entry *parent, struct ramfs_entry *child) {
     child->parent = parent;
 
@@ -199,6 +223,7 @@ static void ramfs_link_child(struct ramfs_entry *parent, struct ramfs_entry *chi
     parent->last_child = child;
 }
 
+/* Remove a referência de um nó filho da lista encadeada do nó pai */
 static int ramfs_unlink_child(
     struct ramfs_entry *parent,
     struct ramfs_entry *child
@@ -235,10 +260,12 @@ static int ramfs_unlink_child(
     return 0;
 }
 
+/* Callback de abertura/fechamento nulo (no-op) para nós do RAMFS */
 static void ramfs_noop(fs_node_t *node) {
     (void)node;
 }
 
+/* Aloca e inicializa um novo nó (arquivo ou diretório) na estrutura hierárquica em memória */
 static struct ramfs_entry *ramfs_create_entry(
     struct ramfs_entry *parent,
     const char *name,
@@ -304,6 +331,7 @@ static struct ramfs_entry *ramfs_create_entry(
     return entry;
 }
 
+/* Realiza a leitura de dados do buffer em RAM do nó de arquivo */
 static uint32_t ramfs_read(fs_node_t *node, uint32_t offset, uint32_t size, uint8_t *buffer) {
     struct ramfs_entry *entry;
 
@@ -332,6 +360,7 @@ static uint32_t ramfs_read(fs_node_t *node, uint32_t offset, uint32_t size, uint
     return size;
 }
 
+/* Escreve dados no nó de arquivo, expandindo dinamicamente o buffer via kmalloc caso necessário */
 static uint32_t ramfs_write(fs_node_t *node, uint32_t offset, uint32_t size, const uint8_t *buffer) {
     struct ramfs_entry *entry;
     uint32_t need;
@@ -355,6 +384,7 @@ static uint32_t ramfs_write(fs_node_t *node, uint32_t offset, uint32_t size, con
 
     need = offset + size;
 
+    /* Expande a capacidade do buffer em potência de 2 se a área atual for insuficiente */
     if (need > entry->capacity) {
         uint32_t new_capacity = entry->capacity;
         uint8_t *new_data;
@@ -398,6 +428,7 @@ static uint32_t ramfs_write(fs_node_t *node, uint32_t offset, uint32_t size, con
     return size;
 }
 
+/* Retorna a entrada N do diretório acessado */
 static fs_node_t *ramfs_readdir(fs_node_t *node, uint32_t index) {
     struct ramfs_entry *entry;
     struct ramfs_entry *cur;
@@ -424,6 +455,7 @@ static fs_node_t *ramfs_readdir(fs_node_t *node, uint32_t index) {
     return 0;
 }
 
+/* Localiza um nó filho com determinado nome em um nó diretório */
 static fs_node_t *ramfs_finddir(fs_node_t *node, const char *name) {
     struct ramfs_entry *entry;
     struct ramfs_entry *child;
@@ -441,6 +473,7 @@ static fs_node_t *ramfs_finddir(fs_node_t *node, const char *name) {
     return child != 0 ? &child->node : 0;
 }
 
+/* Callback do VFS para criação de novos arquivos/diretórios no RAMFS */
 static fs_node_t *ramfs_create(fs_node_t *node, const char *name, uint32_t flags) {
     struct ramfs_entry *parent;
     struct ramfs_entry *entry;
@@ -486,6 +519,7 @@ static fs_node_t *ramfs_create(fs_node_t *node, const char *name, uint32_t flags
     return entry != 0 ? &entry->node : 0;
 }
 
+/* Callback do VFS para remoção de um nó do RAMFS */
 static int ramfs_remove(fs_node_t *node, const char *name) {
     struct ramfs_entry *parent;
     struct ramfs_entry *child;
@@ -505,6 +539,7 @@ static int ramfs_remove(fs_node_t *node, const char *name) {
         return -2;
     }
 
+    /* Impede a remoção de diretórios não vazios */
     if ((child->node.flags & FS_DIRECTORY) != 0U &&
         child->first_child != 0) {
         return -3;
@@ -523,6 +558,7 @@ static int ramfs_remove(fs_node_t *node, const char *name) {
     return 0;
 }
 
+/* Constrói recursivamente a estrutura de diretórios e arquivos a partir dos caminhos do TAR */
 static int ramfs_add_tar_path(const char *path, uint8_t directory, uintptr_t data_ptr, uint32_t size) {
     struct ramfs_entry *parent = &ramfs_root_entry;
     const char *cursor = path;
@@ -584,6 +620,7 @@ static int ramfs_add_tar_path(const char *path, uint8_t directory, uintptr_t dat
     }
 }
 
+/* Cria os diretórios raiz padrão da hierarquia de sistemas UNIX no VFS */
 static void ramfs_create_standard_root(void) {
     static const char *const dirs[] = {
         "/bin",
@@ -599,6 +636,10 @@ static void ramfs_create_standard_root(void) {
     }
 }
 
+/**
+ * Inicializa o RAMFS, define o nó raiz ("/") no VFS, monta a estrutura de diretórios padrão
+ * e analisa (parse) a imagem TAR em memória delimitada por 'start' e 'end'.
+ */
 void init_ramfs(uintptr_t start, uintptr_t end) {
     uintptr_t p = start;
 
@@ -617,6 +658,7 @@ void init_ramfs(uintptr_t start, uintptr_t end) {
     vfs_set_root(&ramfs_root_entry.node);
     ramfs_create_standard_root();
 
+    /* Varre a imagem TAR pré-carregada e extrai os cabeçalhos de arquivo */
     while (p + TAR_BLOCK_SIZE <= end) {
         struct tar_header *hdr = (struct tar_header *)(uintptr_t)p;
         uint32_t file_size;
@@ -644,18 +686,22 @@ void init_ramfs(uintptr_t start, uintptr_t end) {
     }
 }
 
+/* Retorna o nó VFS (fs_node_t) do diretório raiz do RAMFS */
 fs_node_t *ramfs_root(void) {
     return &ramfs_root_entry.node;
 }
 
+/* Resolve um caminho no VFS a partir do RAMFS */
 fs_node_t *ramfs_find(const char *path) {
     return vfs_resolve(path);
 }
 
+/* Cria ou abre um arquivo gravável no RAMFS no caminho especificado */
 fs_node_t *ramfs_touch(const char *path) {
     return vfs_create(path, FS_FILE | FS_WRITABLE);
 }
 
+/* Cria um novo nó diretório no caminho especificado */
 fs_node_t *ramfs_mkdir(const char *path) {
     return vfs_create(path, FS_DIRECTORY);
 }

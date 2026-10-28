@@ -8,22 +8,26 @@
 #include <kernel/tty.h>
 #include <arch/x86/fpu.h>
 
-
+/* Portas I/O dos controladores e dispositivos legados x86 */
 #define PIC1_DATA_PORT 0x21
 #define PIC2_DATA_PORT 0xA1
 #define PIT_CMD_PORT 0x43
 #define PIT_CH0_PORT 0x40
 #define KBD_DATA_PORT 0x60
 #define KBD_STATUS_PORT 0x64
+
+/* Frequência base do PIT (Programmable Interval Timer) */
 #define PIT_BASE_HZ 1193182U
 
 static uint32_t timer_hz_cfg = 100;
 static uint32_t timer_ticks;
 static uint32_t timer_seconds;
 
+/* Estados dos modificadores do teclado */
 static uint8_t kbd_shift;
 static uint8_t kbd_caps;
 
+/* Wrapper de E/S em portas da arquitetura x86 (Assembly Inline) */
 static inline void outb(uint16_t port, uint8_t val) {
     asm volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
 }
@@ -34,6 +38,10 @@ static inline uint8_t inb(uint16_t port) {
     return ret;
 }
 
+/**
+ * Configura o PIT (Channel 0, Mode 3 - Square Wave Generator).
+ * Calcula o divisor de 16 bits para gerar a frequência desejada (em Hz).
+ */
 static void pit_set_frequency(uint32_t hz) {
     uint32_t divisor;
 
@@ -46,6 +54,7 @@ static void pit_set_frequency(uint32_t hz) {
         divisor = 1;
     }
 
+    // 0x32 - Channel 0, LSB/MSB, Mode 3 (Square Wave Generator), Binary
     outb(PIT_CMD_PORT, 0x36);
     outb(PIT_CH0_PORT, (uint8_t)(divisor & 0xFF));
     outb(PIT_CH0_PORT, (uint8_t)((divisor >> 8) & 0xFF));
@@ -53,6 +62,7 @@ static void pit_set_frequency(uint32_t hz) {
     timer_hz_cfg = hz;
 }
 
+/* Renderização de informações de diagnóstico de runtime diretamente na última linha da tela */
 static void print_irq_status(void) {
     uint16_t cursor_before = vga_get_cursor_pos();
 
@@ -71,11 +81,14 @@ static void print_irq_status(void) {
     vga_set_serial_mirror(1);
 }
 
-
+/* Verifica se há dados disponíveis para leitura no controlador PS/2 */
 static uint8_t ps2_has_output(void) {
     return (uint8_t)(inb(KBD_STATUS_PORT) & 0x01U);
 }
-
+/**
+ * Traduz o scancode (Set 1) para ASCII aplicando o mapa do layout ABNT2.
+ * Trata também a lógica de combinação entre Shift e CapsLock para letras e caracteres especiais.
+ */
 static char kbd_translate_abnt2(uint8_t scancode, uint8_t shift, uint8_t caps) {
     static const char normal[128] = {
         [0x02]='1',[0x03]='2',[0x04]='3',[0x05]='4',[0x06]='5',[0x07]='6',
@@ -100,6 +113,8 @@ static char kbd_translate_abnt2(uint8_t scancode, uint8_t shift, uint8_t caps) {
     };
 
     char c = shift ? shifted[scancode] : normal[scancode];
+    
+    // Inverte a caixa do caractere caso shift e CapsLock estejam em estados diferentes
     if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
         if (caps ^ shift) {
             if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
@@ -109,6 +124,7 @@ static char kbd_translate_abnt2(uint8_t scancode, uint8_t shift, uint8_t caps) {
     return c;
 }
 
+/* Handler do Timer */
 static void timer_irq(void) {
     timer_ticks++;
 
@@ -116,11 +132,13 @@ static void timer_irq(void) {
         timer_seconds++;
     }
 
+    // Atualiza a linha de status na tela a cada meio segundo
     if ((timer_ticks % (timer_hz_cfg / 2U ? timer_hz_cfg / 2U : 1U)) == 0) {
         print_irq_status();
     }
 }
 
+/* Encaminha a entrada de texto para a TTY ativa ou shell de Debug Ring 0 */
 static void input_route_char(char c) {
     if (tty1_input_focus() == TTY_INPUT_FOCUS_TTY1) {
         tty1_receive_char(c);
@@ -129,12 +147,14 @@ static void input_route_char(char c) {
     }
 }
 
+/* Força o retorno de foco de entrada para o shell de diagnósticos do kernel */
 static void input_return_to_kernel_shell(void) {
     tty1_set_input_focus(TTY_INPUT_FOCUS_SHELL);
     ring0_shell_resume_input();
 }
 
-static void keyboard_irq(void) {
+/* Handler do Teclado PS/2 (IRQ1) */
+void keyboard_irq(void) {
     uint8_t scancode;
 
     if (!ps2_has_output()) {
@@ -143,41 +163,25 @@ static void keyboard_irq(void) {
 
     scancode = inb(KBD_DATA_PORT);
 
-    if (scancode == 0x2A || scancode == 0x36) {
-        kbd_shift = 1;
-        return;
-    }
-    if (scancode == 0xAA || scancode == 0xB6) {
-        kbd_shift = 0;
-        return;
-    }
-    if (scancode == 0x3A) {
-        kbd_caps ^= 1;
-        return;
-    }
-    /*
-     * F12 is an out-of-band escape from tty1 focus back to the kernel
-     * diagnostic shell. Its break code is ignored by the generic path.
-     */
-    if (scancode == 0x58 &&
-        tty1_input_focus() == TTY_INPUT_FOCUS_TTY1) {
+    // Mapeamento de press/release do Shift e alternância do CapsLock
+    if (scancode == 0x2A || scancode == 0x36) {kbd_shift = 1; return;}
+    if (scancode == 0xAA || scancode == 0xB6) {kbd_shift = 0; return;}
+    if (scancode == 0x3A) {kbd_caps ^= 1; return;}
+    // F12 (scancode 0x58): Tecla de escape para recuperar foco no shell de diagnóstico
+    if (scancode == 0x58 && tty1_input_focus() == TTY_INPUT_FOCUS_TTY1) {
         input_return_to_kernel_shell();
         return;
     }
 
+    // Ignora Break Codes (soltar de teclas) no formato 0x80+
     if (scancode & 0x80) {
         return;
     }
 
-    if (scancode == 0x1C) {
-        input_route_char('\n');
-        return;
-    }
+    // Mapeamentos diretos: Enter (0x1C) e Backspace (0x0E)
+    if (scancode == 0x1C) {input_route_char('\n'); return;}
 
-    if (scancode == 0x0E) {
-        input_route_char('\b');
-        return;
-    }
+    if (scancode == 0x0E) {input_route_char('\b'); return;}
 
     char c = kbd_translate_abnt2(scancode, kbd_shift, kbd_caps);
     if (c != 0) {
@@ -185,19 +189,19 @@ static void keyboard_irq(void) {
     }
 }
 
+/* Handler da Porta Serial UART (IRQ4 - COM1) */
 static void serial_irq(void) {
     while (serial_rx_ready()) {
         char c = serial_getc();
 
+        // Normalização de caracteres da serial
         if (c == '\r') {
             c = '\n';
-        } else if (c == 0x7F) {
+        } else if (c == 0x7F) { // ASCII DEL -> Backspace
             c = '\b';
         }
 
-        /*
-         * Ctrl+] (0x1D) is the serial equivalent of the F12 escape.
-         */
+        // Ctrl+] (0x1D): Escape serial análogo ao F12 do teclado
         if ((uint8_t)c == 0x1DU &&
             tty1_input_focus() == TTY_INPUT_FOCUS_TTY1) {
             input_return_to_kernel_shell();
@@ -208,6 +212,7 @@ static void serial_irq(void) {
     }
 }
 
+/* Inicializa o subsistema de IRQs, PIT e o escalonador preemptivo */
 void irq_init(uint32_t timer_hz, uint32_t scheduler_quantum_ticks) {
     pit_set_frequency(timer_hz);
     sched_init(scheduler_quantum_ticks);
@@ -217,56 +222,56 @@ void irq_init(uint32_t timer_hz, uint32_t scheduler_quantum_ticks) {
     kbd_shift = 0;
     kbd_caps = 0;
 
+    // Leitura das portas de dados para descartar bytes pendentes e limpar os registradores do PIC
     (void)inb(PIC1_DATA_PORT);
     (void)inb(PIC2_DATA_PORT);
 }
 
 
-uint32_t irq_timer_ticks(void) {
-    return timer_ticks;
-}
+uint32_t irq_timer_ticks(void) {return timer_ticks;}
+uint32_t irq_timer_seconds(void) {return timer_seconds;}
+uint32_t irq_timer_hz(void) {return timer_hz_cfg;}
 
-uint32_t irq_timer_seconds(void) {
-    return timer_seconds;
-}
-
-uint32_t irq_timer_hz(void) {
-    return timer_hz_cfg;
-}
-
+/**
+ * Dispatcher principal de Interrupções e Exceções (chamado pelas ISRs/IRQs da IDT em Assembly).
+ * Recebe e pode retornar um novo contexto de registradores (caso ocorra troca de tarefa).
+ */
 registers_t *irq_handler_c(registers_t *regs) {
-      /* #NM - Device Not Available */
+    /* Exceção #NM (Device Not Available - Vector 7): Lazy FPU restoration */
     if (regs->int_no == 7) {
         fpu_handle_nm();
         return regs;
     }
 
+    /* Interrupção de Software para preempção voluntária/yield (Vector 129 / 0x81) */
     if (regs->int_no == 129) {
         return sched_yield_irq(regs);
     }
 
-    /* Não é IRQ */
+    /* Descarta vetores fora do intervalo remapeado do PIC (32 a 47) */
     if (regs->int_no < 32 || regs->int_no > 47) {
         return regs;
     }
 
     uint32_t irq_no = regs->int_no - 32;
     switch (irq_no) {
-        case 0:
+        case 0: // IRQ0: Timer PIT
             timer_irq();
-            pic_send_eoi(irq_no);
-            regs = sched_tick_irq(regs);
+            pic_send_eoi(irq_no); // Envia EOI ao PIC antes de potencialmente trocar o contexto
+            regs = sched_tick_irq(regs); // Pode alterar o ponteiro 'regs' se houver preempt de tarefa
             return regs;
-        case 1:
+        case 1: // IRQ1: Teclado PS/2
             keyboard_irq();
             break;
-        case 4:
+        case 4: // IRQ4: Porta Serial COM1
             serial_irq();
             break;
+
         default:
             break;
         }
 
+    // Sinaliza End Of Interrupt (EOI) para o PIC autorizar novas interrupções
     pic_send_eoi(irq_no);
     return regs;
 }

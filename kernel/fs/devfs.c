@@ -1,10 +1,12 @@
 #include <kernel/devfs.h>
 #include <kernel/tty.h>
 
+/* Nós de arquivo do VFS estáticos para os dispositivos mantidos pelo devfs */
 static fs_node_t devfs_root_node;
 static fs_node_t devfs_null_node;
 static fs_node_t devfs_zero_node;
 
+/* Copia uma string limitando o número máximo de bytes para evitar estouro de buffer */
 static void str_copy_limit(char *dst, const char *src, uint32_t limit) {
     uint32_t i = 0U;
     if (limit == 0U) {
@@ -17,6 +19,7 @@ static void str_copy_limit(char *dst, const char *src, uint32_t limit) {
     dst[i] = 0;
 }
 
+/* Comparação exata de duas strings de texto */
 static int str_eq(const char *a, const char *b) {
     while (*a != 0 && *b != 0) {
         if (*a != *b) {
@@ -28,10 +31,12 @@ static int str_eq(const char *a, const char *b) {
     return *a == *b;
 }
 
+/* Callback no-op (sem operação) para manipuladores de open/close que não exigem estado */
 static void devfs_noop(fs_node_t *node) {
     (void)node;
 }
 
+/* Callback de leitura do /dev/null: sempre retorna 0 bytes (fim de arquivo / EOF) */
 static uint32_t devfs_null_read(
     fs_node_t *node,
     uint32_t offset,
@@ -45,6 +50,7 @@ static uint32_t devfs_null_read(
     return 0U;
 }
 
+/* Callback de escrita para /dev/null e /dev/zero: descarta os dados e simula sucesso */
 static uint32_t devfs_discard_write(
     fs_node_t *node,
     uint32_t offset,
@@ -61,6 +67,7 @@ static uint32_t devfs_discard_write(
     return size;
 }
 
+/* Callback de leitura do /dev/zero: preenche o buffer informado estritamente com zeros */
 static uint32_t devfs_zero_read(
     fs_node_t *node,
     uint32_t offset,
@@ -81,6 +88,7 @@ static uint32_t devfs_zero_read(
     return size;
 }
 
+/* Callback de iteração de diretório (readdir) para o caminho /dev */
 static fs_node_t *devfs_readdir(fs_node_t *node, uint32_t index) {
     if (node != &devfs_root_node) {
         return 0;
@@ -101,6 +109,7 @@ static fs_node_t *devfs_readdir(fs_node_t *node, uint32_t index) {
     return 0;
 }
 
+/* Callback de busca por nome (finddir) no diretório /dev */
 static fs_node_t *devfs_finddir(fs_node_t *node, const char *name) {
     if (node != &devfs_root_node || name == 0) {
         return 0;
@@ -121,12 +130,14 @@ static fs_node_t *devfs_finddir(fs_node_t *node, const char *name) {
     return 0;
 }
 
+/* Zera todos os campos da estrutura fs_node_t */
 static void devfs_clear_node(fs_node_t *node) {
     for (uint32_t i = 0U; i < (uint32_t)sizeof(*node); ++i) {
         ((uint8_t *)node)[i] = 0U;
     }
 }
 
+/* Configura um nó de arquivo pseudo-dispositivo com as operações padrão */
 static void devfs_init_file(
     fs_node_t *node,
     const char *name,
@@ -141,6 +152,10 @@ static void devfs_init_file(
     node->close = devfs_noop;
 }
 
+/**
+ * Inicializa o subsistema DevFS, configura os nós de /dev/null, /dev/zero,
+ * aciona a inicialização do /dev/tty1 e realiza a montagem no ponto "/dev" do VFS.
+ */
 int devfs_init(void) {
     devfs_clear_node(&devfs_root_node);
     str_copy_limit(
@@ -171,6 +186,7 @@ int devfs_init(void) {
     return vfs_mount("/dev", &devfs_root_node);
 }
 
+/* Retorna o nó de arquivo (fs_node_t) raiz do diretório /dev */
 fs_node_t *devfs_root(void) {
     return &devfs_root_node;
 }

@@ -14,7 +14,7 @@
 #include <kernel/fd.h>
 #include <kernel/elf32.h>
 
-
+/* Inclusões dependentes da arquitetura para manipulação de registradores e interrupções */
 #ifdef __x86_64__
 #include <arch/x86_64/irq.h>
 #include <arch/x86_64/regs.h>
@@ -24,6 +24,7 @@
 #include <arch/x86/tss.h>
 #endif
 
+/* Símbolos e rotinas externas de teste para tarefas de User Mode (Ring 3 em x86) */
 #ifndef __x86_64__
 extern void user_test_entry(void);
 extern void user_fault_test_entry(void);
@@ -40,11 +41,13 @@ extern void enter_ring3(uint32_t entry, uint32_t user_stack);
 #define SHELL_BUF 128
 #define KHEAP_SLOTS 16
 
+/* Estado global do buffer de linha de comando e slots de alocação de teste do Heap */
 static char line[SHELL_BUF];
 static uint32_t line_len;
 static void *heap_slots[KHEAP_SLOTS];
 static uint32_t heap_slot_sizes[KHEAP_SLOTS];
 
+/* Comparação exata de duas strings de texto */
 static int str_eq(const char *a, const char *b) {
     while (*a && *b) {
         if (*a != *b) {
@@ -56,6 +59,7 @@ static int str_eq(const char *a, const char *b) {
     return *a == *b;
 }
 
+/* Verifica se uma string inicia com um determinado prefixo */
 static int str_starts(const char *a, const char *prefix) {
     while (*prefix) {
         if (*a++ != *prefix++) {
@@ -65,6 +69,7 @@ static int str_starts(const char *a, const char *prefix) {
     return 1;
 }
 
+/* Retorna o comprimento de uma string em bytes */
 static uint32_t str_len(const char *s) {
     uint32_t n = 0;
     while (s[n] != 0) {
@@ -73,6 +78,7 @@ static uint32_t str_len(const char *s) {
     return n;
 }
 
+/* Localiza a primeira ocorrência de uma sub-string dentro de um buffer de texto */
 static int str_find(const char *s, const char *pat) {
     uint32_t i = 0;
 
@@ -96,6 +102,7 @@ static int str_find(const char *s, const char *pat) {
     return -1;
 }
 
+/* Copia com segurança um intervalo delimitado de caracteres de uma string para um buffer de destino */
 static void str_copy_range(char *dst, uint32_t dst_cap, const char *src, uint32_t start, uint32_t end) {
     uint32_t i = 0;
 
@@ -111,6 +118,7 @@ static void str_copy_range(char *dst, uint32_t dst_cap, const char *src, uint32_
     dst[i] = 0;
 }
 
+/* Converte uma string de dígitos decimais para um inteiro de 32 bits sem sinal */
 static uint32_t parse_u32(const char *s, int *ok) {
     uint32_t v = 0;
     *ok = 0;
@@ -132,10 +140,12 @@ static uint32_t parse_u32(const char *s, int *ok) {
     return v;
 }
 
+/* Identifica delimitadores de espaço em branco (espaço ou tabulação) */
 static int is_space(char c) {
     return (c == ' ' || c == '\t');
 }
 
+/* Avanca o ponteiro de caractere pulando caracteres de espaço em branco */
 static const char *skip_spaces(const char *s) {
     while (*s && is_space(*s)) {
         s++;
@@ -143,6 +153,7 @@ static const char *skip_spaces(const char *s) {
     return s;
 }
 
+/* Converte uma representação hexadecimal em string (ex: "0x1000") para uint32_t */
 static uint32_t parse_hex_u32(const char *s, int *ok) {
     uint32_t v = 0;
     *ok = 0;
@@ -177,18 +188,21 @@ static uint32_t parse_hex_u32(const char *s, int *ok) {
     return v;
 }
 
+/* Exibe o prompt de comando no terminal VGA ($ ) com destaque em Ciano */
 static void shell_prompt(void) {
     vga_set_color(0x0B, 0x00);
     vga_puts("\n$ ");
     vga_set_color(0x0F, 0x00);
 }
 
+/* Restaura o foco e o buffer de entrada do Shell quando devolvido pelo TTY */
 void ring0_shell_resume_input(void) {
     line_len = 0U;
     vga_puts("\n[tty] input focus returned to kernel shell");
     shell_prompt();
 }
 
+/* Localiza o primeiro slot livre na tabela de acompanhamento de alocações do Heap */
 static int heap_find_free_slot(void) {
     for (int i = 0; i < KHEAP_SLOTS; ++i) {
         if (heap_slots[i] == 0) {
@@ -198,10 +212,12 @@ static int heap_find_free_slot(void) {
     return -1;
 }
 
+/* Valida se um determinado índice de slot do Heap contém uma alocação ativa */
 static int heap_slot_valid(uint32_t slot) {
     return (slot < KHEAP_SLOTS && heap_slots[slot] != 0);
 }
 
+/* Força recursão infinita e estouro de pilha (Stack Overflow) para teste da Guard Page */
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winfinite-recursion"
@@ -210,7 +226,6 @@ __attribute__((noinline, noreturn, disable_tail_calls))
 __attribute__((noinline, noreturn))
 #endif
 static void force_stack_overflow(uint32_t depth) {
-
     volatile uint8_t buffer[4096];
 
     buffer[0] = (uint8_t)depth;
@@ -225,8 +240,9 @@ static void force_stack_overflow(uint32_t depth) {
 #pragma clang diagnostic pop
 #endif
 
+/* Comando: pfault — Provoca falhas de página deliberadas para validação do handler #PF */
 static void shell_cmd_pfault(const char *arg) {
-    if (arg == 0 || *arg ==0){
+    if (arg == 0 || *arg == 0){
         klog_warn("usage: pfault [null|readonly|invalid|stack]");
         return;
     }
@@ -245,7 +261,7 @@ static void shell_cmd_pfault(const char *arg) {
     }
 
     if (str_eq(arg, "invalid")) {
-        volatile uint32_t *p = (volatile  uint32_t *)0xA000000U;
+        volatile uint32_t *p = (volatile uint32_t *)0xA000000U;
         *p = 0x12345678U;
         return;
     }
@@ -253,11 +269,12 @@ static void shell_cmd_pfault(const char *arg) {
     if (str_eq(arg, "stack")) {
         force_stack_overflow(0);
         return;
+    }
+
+    klog_warn("usage: pfault [null|readonly|invalid|stack]");
 }
 
-    klog_warn("usage:pfault [null|readonly|invalid|stack]");
-}
-
+/* Comando: panic — Provoca parada de emergência do Kernel por diferentes causas */
 static void shell_cmd_panic(const char *arg) {
     if (arg == 0 || *arg == 0) {
         kernel_panic("panic command invoked", 0);
@@ -275,14 +292,6 @@ static void shell_cmd_panic(const char *arg) {
     }
 
     if (str_eq(arg, "div0")) {
-        // Trigger divide by zero interrupt (intentionally disabled)
-        // asm volatile (
-        //     "xor %%edx, %%edx\n"
-        //     "xor %%eax, %%eax\n"
-        //     "div %%edx\n"
-        //     :
-        //     :
-        //     : "eax", "edx");
         klog_warn("div0: disabled - use 'panic ud2' or 'panic int3' instead");
         return;
     }
@@ -308,6 +317,7 @@ static void shell_cmd_panic(const char *arg) {
     klog_warn("panic usage: panic [int3|ud2|div0|null|int <n>]");
 }
 
+/* Comando: ls — Lista as entradas de um diretório no VFS */
 static void shell_cmd_ls(const char *path) {
     const char *target = (path == 0 || *path == 0) ? "/" : path;
     fs_node_t *directory = vfs_resolve(target);
@@ -354,9 +364,9 @@ static void shell_cmd_ls(const char *path) {
     }
 }
 
+/* Comando: elftest — Inspeciona um executável ELF32 sem carregá-lo na memória */
 static void shell_cmd_elftest(const char *path) {
-    const char *target =
-        (path == 0 || *path == 0) ? "/bin/hello" : path;
+    const char *target = (path == 0 || *path == 0) ? "/bin/hello" : path;
     fs_node_t *node = vfs_resolve(target);
     elf32_ehdr_t header;
     elf32_image_info_t image;
@@ -390,17 +400,10 @@ static void shell_cmd_elftest(const char *path) {
     vga_puthex(image.highest_vaddr);
     vga_puts("\n");
 
-    for (uint32_t i = 0U;
-         i < (uint32_t)header.e_phnum;
-         ++i) {
+    for (uint32_t i = 0U; i < (uint32_t)header.e_phnum; ++i) {
         elf32_phdr_t ph;
 
-        status = elf32_read_program_header(
-            node,
-            &header,
-            i,
-            &ph
-        );
+        status = elf32_read_program_header(node, &header, i, &ph);
         if (status != ELF32_OK) {
             vga_puts(" phdr read failed at index=");
             vga_putdec(i);
@@ -434,10 +437,8 @@ static uint32_t shell_min_u32(uint32_t a, uint32_t b) {
     return (a < b) ? a : b;
 }
 
-static int shell_verify_loaded_elf(
-    fs_node_t *node,
-    const elf32_loaded_image_t *loaded
-) {
+/* Verifica a integridade dos dados carregados na memória virtual em comparação com o arquivo ELF */
+static int shell_verify_loaded_elf(fs_node_t *node, const elf32_loaded_image_t *loaded) {
     elf32_ehdr_t header;
     uint8_t expected[64];
     uint8_t actual[64];
@@ -452,26 +453,18 @@ static int shell_verify_loaded_elf(
         return 0;
     }
 
-    for (uint32_t i = 0U;
-         i < (uint32_t)header.e_phnum;
-         ++i) {
+    for (uint32_t i = 0U; i < (uint32_t)header.e_phnum; ++i) {
         elf32_phdr_t ph;
         uint32_t remaining;
         uint32_t file_offset;
         uint32_t virt;
 
-        status = elf32_read_program_header(
-            node,
-            &header,
-            i,
-            &ph
-        );
+        status = elf32_read_program_header(node, &header, i, &ph);
         if (status != ELF32_OK) {
             return 0;
         }
 
-        if (ph.p_type != ELF32_PT_LOAD ||
-            ph.p_memsz == 0U) {
+        if (ph.p_type != ELF32_PT_LOAD || ph.p_memsz == 0U) {
             continue;
         }
 
@@ -480,33 +473,13 @@ static int shell_verify_loaded_elf(
         virt = ph.p_vaddr;
 
         while (remaining != 0U) {
-            uint32_t page_remaining =
-                VMM_PAGE_SIZE -
-                (virt & (VMM_PAGE_SIZE - 1U));
-            uint32_t chunk =
-                shell_min_u32(
-                    remaining,
-                    shell_min_u32(
-                        page_remaining,
-                        (uint32_t)sizeof(expected)
-                    )
-                );
-            uintptr_t phys =
-                vmm_translate_address_space(
-                    loaded->cr3,
-                    virt
-                );
+            uint32_t page_remaining = VMM_PAGE_SIZE - (virt & (VMM_PAGE_SIZE - 1U));
+            uint32_t chunk = shell_min_u32(remaining, shell_min_u32(page_remaining, (uint32_t)sizeof(expected)));
+            uintptr_t phys = vmm_translate_address_space(loaded->cr3, virt);
 
             if (phys == 0U ||
-                read_fs(
-                    node,
-                    file_offset,
-                    chunk,
-                    expected) != chunk ||
-                vmm_copy_from_phys(
-                    actual,
-                    phys,
-                    chunk) != 0) {
+                read_fs(node, file_offset, chunk, expected) != chunk ||
+                vmm_copy_from_phys(actual, phys, chunk) != 0) {
                 return 0;
             }
 
@@ -525,28 +498,11 @@ static int shell_verify_loaded_elf(
         virt = ph.p_vaddr + ph.p_filesz;
 
         while (remaining != 0U) {
-            uint32_t page_remaining =
-                VMM_PAGE_SIZE -
-                (virt & (VMM_PAGE_SIZE - 1U));
-            uint32_t chunk =
-                shell_min_u32(
-                    remaining,
-                    shell_min_u32(
-                        page_remaining,
-                        (uint32_t)sizeof(actual)
-                    )
-                );
-            uintptr_t phys =
-                vmm_translate_address_space(
-                    loaded->cr3,
-                    virt
-                );
+            uint32_t page_remaining = VMM_PAGE_SIZE - (virt & (VMM_PAGE_SIZE - 1U));
+            uint32_t chunk = shell_min_u32(remaining, shell_min_u32(page_remaining, (uint32_t)sizeof(actual)));
+            uintptr_t phys = vmm_translate_address_space(loaded->cr3, virt);
 
-            if (phys == 0U ||
-                vmm_copy_from_phys(
-                    actual,
-                    phys,
-                    chunk) != 0) {
+            if (phys == 0U || vmm_copy_from_phys(actual, phys, chunk) != 0) {
                 return 0;
             }
 
@@ -564,9 +520,9 @@ static int shell_verify_loaded_elf(
     return 1;
 }
 
+/* Comando: elfloadtest — Executa o ciclo completo de carga, validação de hash/conteúdo e descarga do ELF */
 static void shell_cmd_elfloadtest(const char *path) {
-    const char *target =
-        (path == 0 || *path == 0) ? "/bin/hello" : path;
+    const char *target = (path == 0 || *path == 0) ? "/bin/hello" : path;
     fs_node_t *node = vfs_resolve(target);
     elf32_loaded_image_t loaded = {0};
     uint32_t frames_before;
@@ -595,22 +551,14 @@ static void shell_cmd_elfloadtest(const char *path) {
         return;
     }
 
-    entry_phys =
-        vmm_translate_address_space(
-            loaded.cr3,
-            loaded.entry
-        );
+    entry_phys = vmm_translate_address_space(loaded.cr3, loaded.entry);
 
-    content_ok =
-        (uint8_t)(
-            entry_phys != 0U &&
-            vmm_get_page_flags_address_space(
-                loaded.cr3,
-                loaded.entry,
-                &entry_flags) == 0 &&
-            (entry_flags & VMM_PAGE_USER) != 0U &&
-            shell_verify_loaded_elf(node, &loaded)
-        );
+    content_ok = (uint8_t)(
+        entry_phys != 0U &&
+        vmm_get_page_flags_address_space(loaded.cr3, loaded.entry, &entry_flags) == 0 &&
+        (entry_flags & VMM_PAGE_USER) != 0U &&
+        shell_verify_loaded_elf(node, &loaded)
+    );
 
     vga_puts("elfloadtest: ");
     vga_puts(target);
@@ -629,11 +577,10 @@ static void shell_cmd_elfloadtest(const char *path) {
 
     elf32_unload_image(&loaded);
 
-    cleanup_ok =
-        (uint8_t)(
-            vmm_address_space_count() == spaces_before &&
-            pmm_free_frame_count() == frames_before
-        );
+    cleanup_ok = (uint8_t)(
+        vmm_address_space_count() == spaces_before &&
+        pmm_free_frame_count() == frames_before
+    );
 
     vga_puts("elfloadtest: content=");
     vga_puts(content_ok ? "OK" : "FAILED");
@@ -642,9 +589,9 @@ static void shell_cmd_elfloadtest(const char *path) {
     vga_puts("\n");
 }
 
+/* Comando: elfrun — Carrega e cria um processo executável em Ring 3 a partir de um binário ELF32 */
 static void shell_cmd_elfrun(const char *path) {
-    const char *target =
-        (path == 0 || *path == 0) ? "/bin/hello" : path;
+    const char *target = (path == 0 || *path == 0) ? "/bin/hello" : path;
     fs_node_t *node = vfs_resolve(target);
     uint32_t pid = 0U;
     int status;
@@ -670,16 +617,12 @@ static void shell_cmd_elfrun(const char *path) {
     vga_putdec(pid);
     vga_puts(" entry scheduled in Ring 3\n");
 
-    /*
-     * Hand terminal input ownership to the launched process. The current
-     * hello test does not read stdin, but this gives ELF programs the same
-     * foreground semantics as the existing Ring 3 TTY tests. exit() returns
-     * focus to the kernel shell automatically.
-     */
+    /* Transfere o foco de entrada de teclado para o processo recém-criado */
     tty1_flush_input();
     tty1_set_foreground_pid(pid);
 }
 
+/* Comando: cat — Exibe o conteúdo de um arquivo texto do VFS no terminal */
 static void shell_cmd_cat(const char *name) {
     fs_node_t *entry;
 
@@ -721,6 +664,7 @@ static void shell_cmd_cat(const char *name) {
     vga_puts("\n");
 }
 
+/* Escreve ou redireciona texto para um arquivo especificado no VFS */
 static void shell_write_text_file(const char *name, const char *text) {
     fs_node_t *entry;
     uint32_t text_length;
@@ -752,6 +696,7 @@ static void shell_write_text_file(const char *name, const char *text) {
     vga_puts(" bytes\n");
 }
 
+/* Comando: touch — Cria um arquivo vazio no VFS */
 static void shell_cmd_touch(const char *name) {
     fs_node_t *entry;
 
@@ -771,6 +716,7 @@ static void shell_cmd_touch(const char *name) {
     vga_puts("\n");
 }
 
+/* Comando: mkdir — Cria um diretório no VFS */
 static void shell_cmd_mkdir(const char *path) {
     fs_node_t *entry;
 
@@ -790,6 +736,7 @@ static void shell_cmd_mkdir(const char *path) {
     vga_puts("\n");
 }
 
+/* Comando: virt — Converte um endereço virtual informado em endereço físico via VMM */
 static void shell_cmd_virt(const char *arg) {
     int ok;
     uintptr_t virt;
@@ -819,6 +766,7 @@ static void shell_cmd_virt(const char *arg) {
     vga_puts("\n");
 }
 
+/* Comando: mapped — Consulta se uma página virtual está mapeada no VMM */
 static void shell_cmd_mapped(const char *arg) {
     int ok;
     uintptr_t virt;
@@ -841,6 +789,7 @@ static void shell_cmd_mapped(const char *arg) {
     vga_puts("\n");
 }
 
+/* Comando: unmap — Remove o mapeamento de uma página virtual no VMM */
 static void shell_cmd_unmap(const char *arg) {
     int ok;
     uintptr_t virt;
@@ -870,6 +819,7 @@ static void shell_cmd_unmap(const char *arg) {
     vga_puts("\n");
 }
 
+/* Comando: kslots — Exibe os slots ativos de monitoramento do Heap */
 static void shell_cmd_kslots(void) {
     int found = 0;
 
@@ -891,6 +841,7 @@ static void shell_cmd_kslots(void) {
     }
 }
 
+/* Comando: kmalloc — Realiza alocação de teste no Heap do Kernel associada a um slot */
 static void shell_cmd_kmalloc_slot(const char *arg) {
     int ok;
     uint32_t sz;
@@ -935,6 +886,7 @@ static void shell_cmd_kmalloc_slot(const char *arg) {
     vga_puts("\n");
 }
 
+/* Comando: kfree — Libera um bloco alocado no Heap do Kernel via slot */
 static void shell_cmd_kfree_slot(const char *arg) {
     int ok;
     uint32_t slot;
@@ -964,6 +916,7 @@ static void shell_cmd_kfree_slot(const char *arg) {
     vga_puts("\n");
 }
 
+/* Comando: krealloc — Redimensiona a alocação de um slot do Heap */
 static void shell_cmd_krealloc_slot(const char *arg) {
     int ok_slot;
     int ok_size;
@@ -1029,6 +982,7 @@ static void shell_cmd_krealloc_slot(const char *arg) {
     vga_puts("\n");
 }
 
+/* Comando: tmptest — Testa operações de cópia/zero em janelas temporárias de mapeamento físico */
 static void shell_cmd_tmptest(void) {
     uint32_t src_frame;
     uint32_t dst_frame;
@@ -1061,18 +1015,9 @@ static void shell_cmd_tmptest(void) {
         zero_check[i] = 0xFFU;
     }
 
-    if (vmm_copy_to_phys(
-            (uintptr_t)src_frame + 0x123U,
-            pattern,
-            sizeof(pattern)) != 0 ||
-        vmm_copy_phys(
-            (uintptr_t)dst_frame + 0x2A5U,
-            (uintptr_t)src_frame + 0x123U,
-            sizeof(pattern)) != 0 ||
-        vmm_copy_from_phys(
-            readback,
-            (uintptr_t)dst_frame + 0x2A5U,
-            sizeof(readback)) != 0) {
+    if (vmm_copy_to_phys((uintptr_t)src_frame + 0x123U, pattern, sizeof(pattern)) != 0 ||
+        vmm_copy_phys((uintptr_t)dst_frame + 0x2A5U, (uintptr_t)src_frame + 0x123U, sizeof(pattern)) != 0 ||
+        vmm_copy_from_phys(readback, (uintptr_t)dst_frame + 0x2A5U, sizeof(readback)) != 0) {
         ok = 0U;
     }
 
@@ -1086,13 +1031,8 @@ static void shell_cmd_tmptest(void) {
     }
 
     if (ok &&
-        vmm_zero_phys(
-            (uintptr_t)dst_frame + 0x2A5U,
-            sizeof(zero_check)) == 0 &&
-        vmm_copy_from_phys(
-            zero_check,
-            (uintptr_t)dst_frame + 0x2A5U,
-            sizeof(zero_check)) == 0) {
+        vmm_zero_phys((uintptr_t)dst_frame + 0x2A5U, sizeof(zero_check)) == 0 &&
+        vmm_copy_from_phys(zero_check, (uintptr_t)dst_frame + 0x2A5U, sizeof(zero_check)) == 0) {
         for (uint32_t i = 0U; i < sizeof(zero_check); ++i) {
             if (zero_check[i] != 0U) {
                 ok = 0U;
@@ -1115,6 +1055,7 @@ static void shell_cmd_tmptest(void) {
     pmm_free_frame(src_frame);
 }
 
+/* Comando: mounttest — Testa montagem, navegação e desmontagem de pontos no VFS */
 static void shell_cmd_mounttest(void) {
     fs_node_t *source;
     fs_node_t *target;
@@ -1136,10 +1077,7 @@ static void shell_cmd_mounttest(void) {
         return;
     }
 
-    probe = vfs_create(
-        "/tmp/__mount_probe",
-        FS_FILE | FS_WRITABLE
-    );
+    probe = vfs_create("/tmp/__mount_probe", FS_FILE | FS_WRITABLE);
     if (probe == 0) {
         (void)vfs_remove("/mnttest");
         klog_warn("mounttest: failed to create probe");
@@ -1154,8 +1092,7 @@ static void shell_cmd_mounttest(void) {
     }
 
     mounted_root = vfs_resolve("/mnttest");
-    mounted_probe =
-        vfs_resolve("/mnttest/__mount_probe");
+    mounted_probe = vfs_resolve("/mnttest/__mount_probe");
 
     if (mounted_root != source ||
         mounted_probe != probe ||
@@ -1188,6 +1125,7 @@ static void shell_cmd_mounttest(void) {
     vga_puts("\n");
 }
 
+/* Comando: devtest — Valida leitura/escrita em dispositivos pseudo-caractere (/dev/null, /dev/zero) */
 static void shell_cmd_devtest(void) {
     fs_node_t *null_node = vfs_resolve("/dev/null");
     fs_node_t *zero_node = vfs_resolve("/dev/zero");
@@ -1199,22 +1137,11 @@ static void shell_cmd_devtest(void) {
         ok = 0U;
     }
 
-    if (ok &&
-        read_fs(
-            null_node,
-            0U,
-            sizeof(zero_buf),
-            zero_buf) != 0U) {
+    if (ok && read_fs(null_node, 0U, sizeof(zero_buf), zero_buf) != 0U) {
         ok = 0U;
     }
 
-    if (ok &&
-        write_fs(
-            null_node,
-            0U,
-            (uint32_t)(sizeof(payload) - 1U),
-            payload) !=
-            (uint32_t)(sizeof(payload) - 1U)) {
+    if (ok && write_fs(null_node, 0U, (uint32_t)(sizeof(payload) - 1U), payload) != (uint32_t)(sizeof(payload) - 1U)) {
         ok = 0U;
     }
 
@@ -1223,11 +1150,7 @@ static void shell_cmd_devtest(void) {
             zero_buf[i] = 0xA5U;
         }
 
-        if (read_fs(
-                zero_node,
-                0U,
-                sizeof(zero_buf),
-                zero_buf) != sizeof(zero_buf)) {
+        if (read_fs(zero_node, 0U, sizeof(zero_buf), zero_buf) != sizeof(zero_buf)) {
             ok = 0U;
         }
     }
@@ -1246,6 +1169,7 @@ static void shell_cmd_devtest(void) {
     vga_puts("\n");
 }
 
+/* Comando: ttytest — Testa buffers de recepção e transmissão no dispositivo /dev/tty1 */
 static void shell_cmd_ttytest(void) {
     fs_node_t *tty = vfs_resolve("/dev/tty1");
     static const uint8_t sample[] = {'t', 't', 'y', '1', '\n'};
@@ -1270,12 +1194,7 @@ static void shell_cmd_ttytest(void) {
         ok = 0U;
     }
 
-    if (ok &&
-        read_fs(
-            tty,
-            0U,
-            sizeof(readback),
-            readback) != sizeof(readback)) {
+    if (ok && read_fs(tty, 0U, sizeof(readback), readback) != sizeof(readback)) {
         ok = 0U;
     }
 
@@ -1292,12 +1211,7 @@ static void shell_cmd_ttytest(void) {
         ok = 0U;
     }
 
-    if (write_fs(
-            tty,
-            0U,
-            (uint32_t)sizeof(output) - 1U,
-            output) !=
-        (uint32_t)sizeof(output) - 1U) {
+    if (write_fs(tty, 0U, (uint32_t)sizeof(output) - 1U, output) != (uint32_t)sizeof(output) - 1U) {
         ok = 0U;
     }
 
@@ -1308,12 +1222,12 @@ static void shell_cmd_ttytest(void) {
     vga_puts("\n");
 }
 
+/* Comando: stdiotest — Valida o vínculo dos descritores de arquivo 0, 1 e 2 (stdio) com a TTY */
 static void shell_cmd_stdiotest(void) {
     process_t *process = sched_current_process_ptr();
     fs_node_t *tty = vfs_resolve("/dev/tty1");
     static const uint8_t stdin_sample[] = {'O', 'K'};
-    static const uint8_t stdout_sample[] =
-        "[stdio] fd 1 -> /dev/tty1 OK\n";
+    static const uint8_t stdout_sample[] = "[stdio] fd 1 -> /dev/tty1 OK\n";
     uint8_t stdin_readback[sizeof(stdin_sample)];
     uint8_t ok = 1U;
 
@@ -1346,37 +1260,21 @@ static void shell_cmd_stdiotest(void) {
         tty1_receive_char((char)stdin_sample[0]);
         tty1_receive_char((char)stdin_sample[1]);
 
-        if (fd_read(
-                &process->fds,
-                0U,
-                stdin_readback,
-                sizeof(stdin_readback)) !=
-            (int32_t)sizeof(stdin_readback) ||
+        if (fd_read(&process->fds, 0U, stdin_readback, sizeof(stdin_readback)) != (int32_t)sizeof(stdin_readback) ||
             stdin_readback[0] != stdin_sample[0] ||
             stdin_readback[1] != stdin_sample[1]) {
             ok = 0U;
         }
     }
 
-    if (ok &&
-        fd_write(
-            &process->fds,
-            1U,
-            stdout_sample,
-            (uint32_t)sizeof(stdout_sample) - 1U) !=
-        (int32_t)((uint32_t)sizeof(stdout_sample) - 1U)) {
+    if (ok && fd_write(&process->fds, 1U, stdout_sample, (uint32_t)sizeof(stdout_sample) - 1U) != (int32_t)((uint32_t)sizeof(stdout_sample) - 1U)) {
         ok = 0U;
     }
 
     if (ok) {
         uint32_t new_offset = 0U;
 
-        if (fd_seek(
-                &process->fds,
-                1U,
-                0,
-                0U,
-                &new_offset) != -2) {
+        if (fd_seek(&process->fds, 1U, 0, 0U, &new_offset) != -2) {
             ok = 0U;
         }
     }
@@ -1386,22 +1284,15 @@ static void shell_cmd_stdiotest(void) {
     vga_puts("\n");
 }
 
+/* Comando: ttyfocus — Define ou exibe o dono do foco de entrada de teclado (Kernel Shell vs TTY1) */
 static void shell_cmd_ttyfocus(const char *arg) {
     if (arg == 0 || *arg == 0) {
         vga_puts("ttyfocus: ");
-        vga_puts(
-            tty1_input_focus() == TTY_INPUT_FOCUS_TTY1
-                ? "tty1"
-                : "shell"
-        );
+        vga_puts(tty1_input_focus() == TTY_INPUT_FOCUS_TTY1 ? "tty1" : "shell");
         vga_puts(" fgpid=");
         vga_putdec(tty1_foreground_pid());
         vga_puts(" mode=");
-        vga_puts(
-            tty1_mode() == TTY_MODE_CANONICAL
-                ? "canonical"
-                : "raw"
-        );
+        vga_puts(tty1_mode() == TTY_MODE_CANONICAL ? "canonical" : "raw");
         vga_puts(" echo=");
         vga_puts(tty1_echo_enabled() ? "on" : "off");
         vga_puts(" pending=");
@@ -1417,16 +1308,9 @@ static void shell_cmd_ttyfocus(const char *arg) {
     }
 
     if (str_eq(arg, "tty1")) {
-        /*
-         * Input typed while the kernel shell owns the console must never
-         * become stale stdin for the future foreground userspace task.
-         */
         tty1_flush_input();
         tty1_set_input_focus(TTY_INPUT_FOCUS_TTY1);
-        vga_puts(
-            "ttyfocus: /dev/tty1 owns input "
-            "(F12 or Ctrl+] returns to kernel shell)\n"
-        );
+        vga_puts("ttyfocus: /dev/tty1 owns input (F12 or Ctrl+] returns to kernel shell)\n");
         return;
     }
 
@@ -1434,6 +1318,7 @@ static void shell_cmd_ttyfocus(const char *arg) {
 }
 
 #ifndef __x86_64__
+/* Tarefa temporária usada no teste de desbloqueio por entrada na TTY */
 static void ttyblock_waker_task(void) {
     task_sleep_ticks(100U);
     tty1_receive_char('Z');
@@ -1441,6 +1326,7 @@ static void ttyblock_waker_task(void) {
 }
 #endif
 
+/* Análise e despacho principal de comandos do Shell em Ring 0 */
 static void shell_run_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
         vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest stdiotest ttyblocktest ttyfgtest ttycantest ttyfocus wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo elftest elfloadtest elfrun panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
@@ -1635,7 +1521,7 @@ static void shell_run_command(const char *cmd) {
     } else if (str_eq(cmd, "shutdown")) {
         vga_puts("Shutting down...\n");
 
-        /* Signal QEMU to shutdown */
+        /* Envia o comando de desligamento para a porta ACPI do QEMU (0x604) */
         asm volatile (
             "outw %0, %1"
             :
@@ -1846,24 +1732,26 @@ static void shell_run_command(const char *cmd) {
 
         vga_puts("\n");    
     } else if (str_eq(cmd, "waittest")) {
-    int32_t status = 0;
-    int32_t pid = task_wait_child(&status);
+        int32_t status = 0;
+        int32_t pid = task_wait_child(&status);
 
-    if (pid < 0) {
-        vga_puts("wait: no zombie child\n");
-    } else {
-        vga_puts("wait: pid=");
-        vga_putdec((uint32_t)pid);
+        if (pid < 0) {
+            vga_puts("wait: no zombie child\n");
+        } else {
+            vga_puts("wait: pid=");
+            vga_putdec((uint32_t)pid);
 
-        vga_puts(" code=");
-        vga_putdec((uint32_t)status);
+            vga_puts(" code=");
+            vga_putdec((uint32_t)status);
 
-        vga_puts("\n");
-    } } else if (cmd[0] != 0) {
+            vga_puts("\n");
+        }
+    } else if (cmd[0] != 0) {
         klog_warn("unknown command");
     }
 }
 
+/* Inicializa as variáveis do Shell de diagnósticos e exibe a mensagem pronta */
 void ring0_shell_init(void) {
     line_len = 0;
 
@@ -1876,6 +1764,7 @@ void ring0_shell_init(void) {
     shell_prompt();
 }
 
+/* Handler de entrada de caractere vindo do teclado/serial para tratamento no Shell */
 void ring0_shell_on_key(char c) {
     if (c == '\r') {
         return;

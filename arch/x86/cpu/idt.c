@@ -8,10 +8,15 @@ extern void isr_default(void);
 static struct idt_entry idt[IDT_ENTRIES];
 static struct idt_ptr idt_descriptor;
 
+/* Carrega o registrador IDTR usando a instrução LIDT*/
 static inline void lidt(struct idt_ptr* idt_ptr){
     asm volatile ("lidt (%0)" : : "r"(idt_ptr));
 }
 
+/**
+ * Preenche uma entrada da IDT dividindo o ponteiro de 32 bitys da ISR.
+ * Seletor 0x08 (código do kernel) e atributos de tipo fornecidos.
+ */
 static void idt_set_gate(int n, uint32_t handler, uint8_t type_attr) {
     idt[n].offset_low   = handler & 0xFFFF;
     idt[n].selector     = 0x08;
@@ -20,6 +25,10 @@ static void idt_set_gate(int n, uint32_t handler, uint8_t type_attr) {
     idt[n].offset_high  = (handler >> 16) & 0xFFFF;
 }
 
+/**
+ * Preenche todas as 256 entradas com um handler padrão
+ * e carrega o ponteioro da tabela no registrador IDTR
+ */
 void idt_init(void) {
     for (int i = 0; i < IDT_ENTRIES; i++) {
         idt_set_gate(i, (uint32_t)isr_default, 0x8E);
@@ -30,6 +39,7 @@ void idt_init(void) {
     lidt(&idt_descriptor);
 }
 
+/* ISRs de exceções da CPU e syscalls implementadas em Assembly */
 extern void isr0();
 extern void isr1();
 extern void isr2();
@@ -65,6 +75,11 @@ extern void isr31();
 
 extern void isr128();
 
+/**
+ * Registra os handlers de exceções reservadas da CPU (0-31)
+ * 0x8E: Presente, DPL=0, Tipo=Interrupt Gate
+ * 0xEE: Presente, DPL=3, Tipo=Interrupt Gate (para syscalls) permitindo int 0x80 a partir de user mode
+ */
 void idt_install_isrs(void) {
     idt_set_gate(0, (uint32_t)isr0, 0x8E);
     idt_set_gate(1, (uint32_t)isr1, 0x8E);
@@ -98,9 +113,12 @@ void idt_install_isrs(void) {
     idt_set_gate(29, (uint32_t)isr29, 0x8E);
     idt_set_gate(30, (uint32_t)isr30, 0x8E);
     idt_set_gate(31, (uint32_t)isr31, 0x8E);
+
+    // Syscall (0x80): DPL = 3, permitindo chamadas de user mode
     idt_set_gate(128, (uint32_t)isr128, 0xEE);
 }
 
+/* Handlers de IRQs (PIC remapeado para 32-37) */
 extern void irq0();
 extern void irq1();
 extern void irq2();
@@ -119,6 +137,10 @@ extern void irq14();
 extern void irq15();
 extern void irq_yield();
 
+/**
+ * Registra os handlers de IRQs de hardware (32-47)
+ * Mapeia dispositivos como PIT (irq0), teclado (irq1), etc.
+ */
 void idt_install_irqs(void) {
     idt_set_gate(32, (uint32_t)irq0, 0x8E);
     idt_set_gate(33, (uint32_t)irq1, 0x8E);
@@ -137,5 +159,6 @@ void idt_install_irqs(void) {
     idt_set_gate(46, (uint32_t)irq14, 0x8E);
     idt_set_gate(47, (uint32_t)irq15, 0x8E);
 
+    // Handler para yield de tarefas (software interrupt)
     idt_set_gate(129, (uint32_t)irq_yield, 0x8E);
 }

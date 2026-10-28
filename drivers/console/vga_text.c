@@ -1,22 +1,28 @@
 #include <kernel/vga.h>
 #include <kernel/serial.h>
 
+/* Endereço base da memória de vídeo VGA no modo texto de 80x25 (16 cores) */
 #define VGA_MEM ((volatile uint8_t *)0xB8000)
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
 #define VGA_SIZE (VGA_WIDTH * VGA_HEIGHT)
 
+/* Portas de controle do Controlador de Display CRT da placa VGA */
 #define CRT_INDEX_PORT 0x3D4
 #define CRT_DATA_PORT 0x3D5
 
 static uint16_t cursor;
-static uint8_t color = 0x0F;
+static uint8_t color = 0x0F; // Padrão: Texto Branco (0x0F) com Fundo Preto (0x00)
 static int serial_mirror = 1;
 
 static inline void outb(uint16_t port, uint8_t val) {
     asm volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
 }
 
+/**
+ * Atualiza a posição do cursor piscante de hardware da placa VGA.
+ * Envia os bytes LSB (registro 0x0F) e MSB (registro 0x0E) para a porta I/O CRT.
+ */
 static void vga_sync_hw_cursor(void) {
     outb(CRT_INDEX_PORT, 0x0F);
     outb(CRT_DATA_PORT, (uint8_t)(cursor & 0xFF));
@@ -24,11 +30,16 @@ static void vga_sync_hw_cursor(void) {
     outb(CRT_DATA_PORT, (uint8_t)((cursor >> 8) & 0xFF));
 }
 
+/**
+ * Realiza o scroll da tela quando o cursor ultrapassa a última linha.
+ * Copia as linhas 1..24 uma posição para cima e limpa a linha 24 com espaços em branco.
+ */
 static void vga_scroll_if_needed(void) {
     if (cursor < VGA_SIZE) {
         return;
     }
 
+    // Copia os pares de byte (Caractere + Atributo de Cor) para a linha acima
     for (uint16_t row = 1; row < VGA_HEIGHT; ++row) {
         for (uint16_t col = 0; col < VGA_WIDTH; ++col) {
             uint16_t from = row * VGA_WIDTH + col;
@@ -38,6 +49,7 @@ static void vga_scroll_if_needed(void) {
         }
     }
 
+    // Limpa a última linha preenchendo-a com espaços em branco na cor atual
     for (uint16_t col = 0; col < VGA_WIDTH; ++col) {
         uint16_t cell = (VGA_HEIGHT - 1) * VGA_WIDTH + col;
         VGA_MEM[cell * 2] = ' ';
@@ -59,10 +71,12 @@ void vga_set_cursor_pos(uint16_t pos) {
     vga_sync_hw_cursor();
 }
 
+/* Configura o byte de atributo de cor (bits 4..7: cor de fundo, bits 0..3: cor de texto) */
 void vga_set_color(uint8_t fg, uint8_t bg) {
     color = (uint8_t)((bg << 4) | (fg & 0x0F));
 }
 
+/* Limpa a tela preenchendo todo o buffer VGA com espaços em branco e reseta o cursor */
 void vga_clear(void) {
     for (uint16_t i = 0; i < VGA_SIZE; ++i) {
         VGA_MEM[i * 2] = ' ';
@@ -72,7 +86,12 @@ void vga_clear(void) {
     vga_sync_hw_cursor();
 }
 
+/**
+ * Imprime um caractere individual no buffer VGA.
+ * Suporta caracteres de controle (\n, \r, \b) e espelhamento automático via Serial.
+ */
 void vga_putc(char c) {
+    // Replica a saída na porta serial COM1 se o espelhamento estiver ativado
     if (serial_mirror) {
         serial_putc(c);
     }
@@ -98,6 +117,7 @@ void vga_putc(char c) {
         return;
     }
 
+    // Escreve o caractere ASCII e seu byte de atributo diretamente na VRAM
     VGA_MEM[cursor * 2] = (uint8_t)c;
     VGA_MEM[cursor * 2 + 1] = color;
     cursor++;
@@ -111,6 +131,7 @@ void vga_puts(const char *s) {
     }
 }
 
+/* Imprime um valor inteiro de 32 bits formatado em hexadecimal (0xXXXXXXXX) */
 void vga_puthex(uint32_t value) {
     static const char *hex = "0123456789ABCDEF";
 
@@ -120,6 +141,7 @@ void vga_puthex(uint32_t value) {
     }
 }
 
+/* Imprime um valor inteiro de 64 bits formatado em hexadecimal (0xXXXXXXXXXXXXXXXX) */
 void vga_puthex64(uint64_t value) {
     static const char *hex = "0123456789ABCDEF";
 
@@ -129,6 +151,7 @@ void vga_puthex64(uint64_t value) {
     }
 }
 
+/* Imprime um valor inteiro não assinado em formato decimal */
 void vga_putdec(uint32_t value) {
     char buf[10];
     int i = 0;
@@ -148,12 +171,13 @@ void vga_putdec(uint32_t value) {
     }
 }
 
+/* Imprime uma string em um deslocamento (offset) arbitrário da memória de vídeo */
 void vga_write_at(uint16_t pos, const char *s) {
     vga_set_cursor_pos(pos);
     vga_puts(s);
 }
 
-
+/* Alterna o espelhamento das chamadas de impressão para a saída da porta serial */
 void vga_set_serial_mirror(int enabled) {
     serial_mirror = enabled ? 1 : 0;
 }

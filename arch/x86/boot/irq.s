@@ -58,8 +58,8 @@ irq_common_stub:
 	jz 1f
 	mov %eax, %esp
 	1:
-	# irq_handler_c may return a different saved CPU frame.
-	# This is what turns the PIT IRQ into a real preemptive scheduler.
+	# irq_handler_c pode retornar um frame diferente do CPU salvo.
+	# É isso que torna o IRQ do PIT em um scheduler preemptivo verdadeito.
 	test %eax, %eax
 	jz 1f
 	mov %eax, %esp

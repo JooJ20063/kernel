@@ -8,6 +8,7 @@
 #include <arch/x86/irq.h>
 #include <arch/x86/tss.h>
 
+/* Tamanho do stack de kernel para cada tarefa e seletores GDT para Ring 0 e Ring 3 */
 #define KERNEL_STACK_SIZE   4096
 #define EFLAGS_IF           0x00000202U
 #define KERNEL_CS           0x08U
@@ -15,12 +16,14 @@
 #define USER_CS             0x1BU
 #define USER_DS             0x23U
 
+/* Símbolos exportados pelo linker script marcando os limites das seções de usuário */
 extern uint8_t _user_text_start;
 extern uint8_t _user_text_end;
 extern uint8_t _user_data_start;
 extern uint8_t _user_data_end;
 
-static uint32_t quantum = 10; // Default quantum in ticks
+/* Variáveis estáticas de controle do escalonador Round-Robin */
+static uint32_t quantum = 10; // Quantum padrão em ticks do timer (PIT)
 static uint32_t tick_acc = 0;
 static uint32_t switches = 0;
 static uint32_t next_tid = 1U;
@@ -30,19 +33,19 @@ static uint32_t last_exit_code = 0;
 
 static uint8_t demo_started = 0;
 
+/* Instâncias da tarefa e do processo Idle (PID/TID 0) e ponteiros da lista circular */
 static task_t idle_task;
 static process_t idle_process;
 static task_t *current = 0;
 static task_t *task_list = 0;
 
+/* Variáveis para tarefas de demonstração e checagem de registradores SSE/FPU */
 static volatile uint32_t demo_counter_a = 0;
 static volatile uint32_t demo_counter_b = 0;
-
-
-
 static volatile float sse_value_a = 0.0f;
 static volatile float sse_value_b = 0.0f;
 
+/* Zera uma área de memória */
 static void mem_zero(void *ptr, uint32_t size) {
     uint8_t *p = (uint8_t *)ptr;
     
@@ -51,6 +54,7 @@ static void mem_zero(void *ptr, uint32_t size) {
     }
 }
 
+/* Converte a enumeração de estado da tarefa para uma representação textual */
 static const char *state_name(task_state_t state) {
     switch (state) {
         case TASK_UNUSED:   return "UNUSED";
@@ -62,6 +66,7 @@ static const char *state_name(task_state_t state) {
     }
 }
 
+/* Salva eFLAGS, desativa interrupções de hardware (cli) e retorna o estado salvo */
 static inline uint32_t irq_save_disable(void) {
     uint32_t flags;
 
@@ -77,12 +82,14 @@ static inline uint32_t irq_save_disable(void) {
     return flags;
 }
 
+/* Restaura o estado das interrupções checando o bit IF (bit 9) das EFLAGS salvas */
 static inline void irq_restore(uint32_t flags) {
     if (flags & (1U << 9)) {
         asm volatile ("sti" : : : "memory");
     }
 }
 
+/* Adiciona uma nova tarefa à lista encadeada circular de tarefas do escalonador */
 static void add_task(task_t *task) {
     if (task_list == 0) {
         task_list = task;
@@ -101,6 +108,7 @@ static void add_task(task_t *task) {
     task_count++;
 }
 
+/* Varre a lista de tarefas e acorda aquelas cujo tempo de bloqueio por sleep expirou */
 static void wake_sleeping_tasks(void) {
     if (task_list == 0) {
         return;
@@ -123,6 +131,10 @@ static void wake_sleeping_tasks(void) {
     } while (t != task_list);
 }
 
+/**
+ * Atualiza o campo ESP0 do Task State Segment (TSS) com o topo da pilha de kernel da tarefa.
+ * Essencial para que transições de interrupção em Ring 3 restaurem a pilha do Kernel.
+ */
 static void update_tss_for_task(task_t *task) {
     if (task == 0 ||
         task->kernel_stack == 0 ||
@@ -137,6 +149,7 @@ static void update_tss_for_task(task_t *task) {
     tss_set_kernel_stack(stack_top);
 }
 
+/* Ativa o espaço de memória virtual (CR3) pertencente ao processo da tarefa informada */
 static void activate_task_address_space(task_t *task) {
     if (task == 0 || task->process == 0) {
         vmm_switch_address_space(vmm_kernel_cr3());
@@ -146,6 +159,7 @@ static void activate_task_address_space(task_t *task) {
     vmm_switch_address_space(task->process->cr3);
 }
 
+/* Localiza a próxima tarefa no estado TASK_READY a partir da tarefa atual (Round-Robin) */
 static task_t *pic_next_ready(void) {
     if (current == 0) {
         return 0;
@@ -164,6 +178,7 @@ static task_t *pic_next_ready(void) {
     return current;
 }
 
+/* Inicializa os ponteiros de uma fila de espera (wait_queue_t) */
 void wait_queue_init(wait_queue_t *queue) {
     if (queue == 0) {
         return;
@@ -173,6 +188,10 @@ void wait_queue_init(wait_queue_t *queue) {
     queue->tail = 0;
 }
 
+/**
+ * Inicializa o escalonador preemptivo, define o quantum de execução e configura
+ * a tarefa Bootstrap/Idle de Ring 0 (TID 0 / PID 0).
+ */
 void sched_init(uint32_t quantum_ticks) {
     if (quantum_ticks > 0) {
         quantum = quantum_ticks;
@@ -205,11 +224,13 @@ void sched_init(uint32_t quantum_ticks) {
     current = &idle_task;
 }
 
+/* Atribui o CR3 inicial do Kernel à tarefa Bootstrap/Idle */
 void sched_set_bootstrap_address_space(uint32_t cr3) {
     idle_process.cr3 =
         (cr3 != 0U) ? cr3 : vmm_kernel_cr3();
 }
 
+/* Coloca a tarefa atual em suspensão por um número fixo de ticks do timer */
 void task_sleep_ticks(uint32_t ticks) {
     if (current == 0 || current == &idle_task) {
         return;
@@ -227,6 +248,7 @@ void task_sleep_ticks(uint32_t ticks) {
     task_yield();
 }
 
+/* Prepara a marcação de suspensão da tarefa atual sem invocar imediatamente o yield */
 void task_sleep_prepare(uint32_t ticks) {
     if (current == 0 || current == &idle_task) {
         return;
@@ -241,6 +263,7 @@ void task_sleep_prepare(uint32_t ticks) {
     current->state = TASK_BLOCKED;
 }
 
+/* Enfileira a tarefa atual no final da fila de espera fornecida */
 static void task_wait_enqueue_current(wait_queue_t *queue) {
     current->wait_next = 0;
     current->wake_tick = 0;
@@ -256,12 +279,8 @@ static void task_wait_enqueue_current(wait_queue_t *queue) {
     }
 }
 
+/* Força a cedição do processador via software interrupt sem janela de perda de wakeups */
 static void task_wait_schedule(uint32_t flags) {
-    /*
-     * If IF was set before CLI, STI defers external IRQ delivery until
-     * after the next instruction. That next instruction is INT $0x81,
-     * so there is no wakeup gap between queueing and scheduling away.
-     */
     if ((flags & (1U << 9)) != 0U) {
         asm volatile (
             "sti\n"
@@ -280,6 +299,7 @@ static void task_wait_schedule(uint32_t flags) {
     }
 }
 
+/* Coloca a tarefa atual em bloqueio incondicional dentro de uma wait queue */
 void task_wait(wait_queue_t *queue) {
     uint32_t flags;
 
@@ -294,6 +314,7 @@ void task_wait(wait_queue_t *queue) {
     task_wait_schedule(flags);
 }
 
+/* Aguarda atômica e condicionalmente dentro de uma wait queue se a condição não for satisfeita */
 int task_wait_until(
     wait_queue_t *queue,
     wait_condition_t condition,
@@ -310,11 +331,6 @@ int task_wait_until(
 
     flags = irq_save_disable();
 
-    /*
-     * The readiness check and queue insertion happen under the same IRQ
-     * exclusion window. Producers cannot make the condition true between
-     * these two operations, so event wakeups cannot be lost.
-     */
     if (condition(ctx)) {
         irq_restore(flags);
         return 0;
@@ -325,6 +341,7 @@ int task_wait_until(
     return 0;
 }
 
+/* Acorda a primeira tarefa bloqueada no início da wait queue */
 int wait_queue_wake_one(wait_queue_t *queue) {
     uint32_t flags;
     task_t *task;
@@ -356,6 +373,7 @@ int wait_queue_wake_one(wait_queue_t *queue) {
     return 1;
 }
 
+/* Acorda todas as tarefas aguardando na wait queue e as move para TASK_READY */
 void wait_queue_wake_all(wait_queue_t *queue) {
     uint32_t flags;
     task_t *task;
@@ -383,6 +401,7 @@ void wait_queue_wake_all(wait_queue_t *queue) {
     irq_restore(flags);
 }
 
+/* Bloqueia a tarefa atual por um evento genérico e aciona a troca de contexto */
 void task_block(void) {
     if (current == 0 || current == &idle_task) {
         return;
@@ -395,6 +414,7 @@ void task_block(void) {
     task_yield();
 }
 
+/* Move uma tarefa do estado TASK_BLOCKED para TASK_READY */
 void task_wake(task_t *task) {
     if (task == 0) {
         return;
@@ -409,6 +429,7 @@ void task_wake(task_t *task) {
     task->state = TASK_READY;
 }
 
+/* Procura uma tarefa na lista global comparando pelo PID do seu processo */
 static task_t *find_task_by_pid(uint32_t pid) {
     if (task_list == 0) {
         return 0;
@@ -427,6 +448,7 @@ static task_t *find_task_by_pid(uint32_t pid) {
     return 0;
 }
 
+/* Coleta e destrói o primeiro processo filho no estado ZOMBIE pertencente ao processo atual */
 int32_t task_wait_child(int32_t *status) {
     if (current == 0 || task_list == 0) {
         return -1;
@@ -482,6 +504,7 @@ int32_t task_wait_child(int32_t *status) {
     return -1;
 }
 
+/* Varre a lista e recicla automaticamente processos em estado ZOMBIE cujos pais faleceram */
 static void reap_zombies(void) {
     if (task_list == 0) {
         return;
@@ -489,7 +512,6 @@ static void reap_zombies(void) {
 
     task_t *prev = task_list;
     task_t *t = task_list->next;
-
 
     do {
         uint32_t parent_pid =
@@ -536,7 +558,11 @@ static void reap_zombies(void) {
     } while (t != task_list);
 }
 
-
+/**
+ * Handler de interrupção de timer (PIT / INT $0x20).
+ * Incrementa o quantum atual, reavalia bloqueios de sleep, limpa zombies e
+ * escolhe a próxima tarefa READY salvando e restaurando a frame de registradores.
+ */
 registers_t *sched_tick_irq(registers_t *regs) {
     if (current == 0) {
         return regs;
@@ -577,6 +603,10 @@ registers_t *sched_tick_irq(registers_t *regs) {
     return next->context;
 }
 
+/**
+ * Handler da interrupção de software para cedição voluntária do processador (INT $0x81).
+ * Realiza a troca imediata para a próxima tarefa READY.
+ */
 registers_t *sched_yield_irq(registers_t *regs) {
     if (current == 0) {
         return regs;
@@ -587,7 +617,7 @@ registers_t *sched_yield_irq(registers_t *regs) {
     task_t *old = current;
     task_t *next = pic_next_ready();
 
-    if (next ==  0 || next == old || next->context == 0) {
+    if (next == 0 || next == old || next->context == 0) {
         return regs;
     }
 
@@ -606,6 +636,7 @@ registers_t *sched_yield_irq(registers_t *regs) {
     return next->context;
 }
 
+/* Retorna o PPID (Parent Process ID) do processo atual */
 uint32_t sched_current_ppid(void){
     if (current == 0 || current->process == 0) {
         return 0;
@@ -613,6 +644,7 @@ uint32_t sched_current_ppid(void){
     return current->process->parent_pid;
 }
 
+/* Cria uma nova tarefa executada exclusivamente em modo Kernel (Ring 0) */
 int sched_create_kernel_task(const char *name, void (*entry)(void)) {
     task_t *task;
     uint8_t *stack;
@@ -682,6 +714,7 @@ int sched_create_kernel_task(const char *name, void (*entry)(void)) {
     return (int)process->pid;
 }
 
+/* Cria uma nova tarefa executada em modo Usuário (Ring 3) dentro de um espaço de endereçamento (CR3) específico */
 int sched_create_user_task_in_address_space(
     const char *name,
     uintptr_t entry,
@@ -757,6 +790,7 @@ int sched_create_user_task_in_address_space(
     return (int)process->pid;
 }
 
+/* Executa um novo binário no processo atual (execve), substituindo a imagem de memória e os registradores */
 int sched_exec_current_address_space(
     const char *name,
     uintptr_t entry,
@@ -823,6 +857,7 @@ int sched_exec_current_address_space(
     return 0;
 }
 
+/* Clona o espaço de endereçamento do processo atual e aloca uma nova tarefa de usuário (fork) */
 int sched_create_user_task(
     const char *name,
     void (*entry)(void),
@@ -868,6 +903,8 @@ int sched_create_user_task(
 
     return pid;
 }
+
+/* Tarefas de demonstração para testes de SSE/FPU e do escalonador */
 
 static void demo_task_a(void) {
     float x = 1.0f;
@@ -932,17 +969,16 @@ static void demo_sleep_task(void) {
 static volatile uint32_t event_demo_counter = 0;
 static volatile uint32_t event_waker_counter = 0;
 
-
 static void demo_event_waker(void) {
     for (;;) {
         task_sleep_ticks(300);
 
         wait_queue_wake_all(&event_demo_queue);
         event_waker_counter++;
-        
     }
 }
 
+/* Cria as tarefas de demonstração do kernel para testes de concorrência e preempção */
 void sched_demo_init(void) {
     if (demo_started) {
         return;
@@ -968,6 +1004,8 @@ void sched_demo_init(void) {
     (void)sched_create_kernel_task("event-a", demo_event_a);
     (void)sched_create_kernel_task("event-b", demo_event_b);
 }
+
+/* Funções de inspeção de estado e métricas do escalonador */
 
 uint32_t sched_demo_counter_a(void) {
     return demo_counter_a;
@@ -1035,6 +1073,7 @@ uint32_t sched_task_count(void) {
     return task_count;
 }
 
+/* Imprime na tela VGA a tabela com todas as tarefas registradas e seus respectivos estados */
 void task_list_tasks(void) {
     if (task_list == 0) {
         vga_puts("No tasks");
@@ -1082,21 +1121,20 @@ void sched_dump_tasks(void) {
     task_list_tasks();
 }
 
+/* Solicita a cedição voluntária da CPU disparando a interrupção de software INT $0x81 */
 void task_yield(void) {
     asm volatile ("int $0x81");
 }
 
+/* Transfere o foco de entrada do terminal para o Ring 0 shell caso o processo em foreground encerre */
 static void task_release_foreground_tty(process_t *process) {
     if (process != 0 &&
         tty1_release_foreground(process->pid) != 0) {
-        /*
-         * The Ring 0 shell is the current fallback owner until a real
-         * userspace session/init path exists.
-         */
         ring0_shell_resume_input();
     }
 }
 
+/* Marca a tarefa e o processo atual como encerrados com o código de saída especificado */
 void task_exit_code(int32_t code) {
     if (current != 0) {
         task_release_foreground_tty(current->process);
@@ -1111,10 +1149,12 @@ void task_exit_code(int32_t code) {
     }
 }
 
+/* Encerra a tarefa ativa com código de saída padrão 0 */
 void task_exit(void) {
     task_exit_code(0);
 }
 
+/* Trata o encerramento forçado de uma tarefa a partir de uma exceção não tratada da CPU (Page Fault, etc.) */
 registers_t *task_exit_from_exception(registers_t *regs, int32_t exit_code) {
     if (current == 0 || current == &idle_task || regs == 0) {
         return regs;
@@ -1130,10 +1170,12 @@ registers_t *task_exit_from_exception(registers_t *regs, int32_t exit_code) {
     return sched_yield_irq(regs);
 }
 
+/* Retorna o ponteiro para a estrutura task_t atualmente ativa */
 task_t *sched_current_task_ptr(void) {
     return current;
 }
 
+/* Retorna o ponteiro para a estrutura process_t associada à tarefa ativa */
 process_t *sched_current_process_ptr(void) {
     if (current == 0) {
         return 0;

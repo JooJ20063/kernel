@@ -20,15 +20,15 @@ isr\n:
 .endm
 
 # 0-31 (x86)
-ISR_NOERR   0 #Divide by 0
+ISR_NOERR   0           #Divide by 0
 ISR_NOERR   1
 ISR_NOERR   2
-ISR_NOERR   3 #Breakpoint
+ISR_NOERR   3           #Breakpoint
 ISR_NOERR   4
 ISR_NOERR   5
 ISR_NOERR   6
 ISR_NOERR   7
-ISR_ERR     8 #Double fault
+ISR_ERR     8           #Double fault
 ISR_NOERR   9
 ISR_ERR     10
 ISR_ERR     11
