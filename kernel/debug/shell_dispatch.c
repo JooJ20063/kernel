@@ -98,8 +98,6 @@ void shell_run_command(const char *cmd) {
         vga_puts(" hz=");
         vga_putdec(irq_timer_hz());
         vga_puts("\n");
-    } else if (shell_str_eq(cmd, "task")) {
-        shell_cmd_task();
     } else if (shell_str_eq(cmd, "pmm")) {
         vga_puts("frames total=");
         vga_putdec(pmm_total_frame_count());
@@ -120,16 +118,6 @@ void shell_run_command(const char *cmd) {
         vga_puts(" temp=");
         vga_puts(vmm_temp_window_is_ready() ? "ON" : "OFF");
         vga_puts("\n");
-    } else if (shell_str_eq(cmd, "tmptest")) {
-        shell_cmd_tmptest();
-    } else if (shell_str_eq(cmd, "mounttest")) {
-        shell_cmd_mounttest();
-    } else if (shell_str_eq(cmd, "devtest")) {
-        shell_cmd_devtest();
-    } else if (shell_str_eq(cmd, "ttytest")) {
-        shell_cmd_ttytest();
-    } else if (shell_str_eq(cmd, "stdiotest")) {
-        shell_cmd_stdiotest();
     } else if (shell_str_eq(cmd, "ttyfocus")) {
         shell_cmd_ttyfocus(0);
     } else if (shell_str_starts(cmd, "ttyfocus ")) {
@@ -150,8 +138,6 @@ void shell_run_command(const char *cmd) {
         vga_puts(" blocks=");
         vga_putdec(kmalloc_block_count());
         vga_puts("\n");
-    } else if (shell_str_eq(cmd, "kslots")) {
-        shell_cmd_kslots();
     } else if (shell_str_starts(cmd, "kmalloc ")) {
         shell_cmd_kmalloc_slot(shell_skip_spaces(cmd + 8));
     } else if (shell_str_starts(cmd, "kfree ")) {
@@ -227,8 +213,6 @@ void shell_run_command(const char *cmd) {
         vga_puts("kheapcheck=");
         vga_puts(kheap_check() ? "OK" : "CORRUPT");
         vga_puts("\n");
-    } else if (shell_str_eq(cmd, "ps")) {
-        shell_cmd_ps();
     } else if (shell_str_eq(cmd, "shutdown")) {
         vga_puts("Shutting down...\n");
 
@@ -245,8 +229,6 @@ void shell_run_command(const char *cmd) {
         for (;;) {
             asm volatile ("hlt");
         }
-    } else if (shell_str_eq(cmd, "schedtest")) {
-        shell_cmd_schedtest();
     } else if (shell_str_eq(cmd, "tss")) {
         vga_puts("TR=");
         vga_puthex((uint32_t)tss_get_selector());
@@ -276,10 +258,6 @@ void shell_run_command(const char *cmd) {
     } else if (shell_str_eq(cmd, "ring3as")) {
         shell_cmd_ring3as();
 #endif
-    } else if (shell_str_eq(cmd, "lastexit")) {
-        shell_cmd_lastexit();
-    } else if (shell_str_eq(cmd, "waittest")) {
-        shell_cmd_waittest();
     } else if (cmd[0] != 0) {
         klog_warn("unknown command");
     }
