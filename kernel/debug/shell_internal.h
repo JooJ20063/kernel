@@ -72,4 +72,9 @@ void shell_cmd_ttyfgtest(void);
 void shell_cmd_ttycantest(void);
 #endif
 
+
+/* Diagnosticos destrutivos: uso apenas controlado. */
+void shell_cmd_pfault(const char *arg);
+void shell_cmd_panic(const char *arg);
+
 #endif

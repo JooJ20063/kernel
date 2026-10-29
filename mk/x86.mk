@@ -38,6 +38,7 @@ C_SRCS := \
 	kernel/sched/process.c \
 	kernel/sched/task.c \
 	kernel/debug/ring0_shell.c \
+	kernel/debug/shell_cmd_fault.c \
 	kernel/debug/shell_cmd_tty_tests.c \
 	kernel/debug/shell_cmd_tty.c \
 	kernel/debug/shell_cmd_ring3.c \
