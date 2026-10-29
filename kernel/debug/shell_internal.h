@@ -81,4 +81,7 @@ void shell_cmd_panic(const char *arg);
 void shell_cmd_mounttest(void);
 void shell_cmd_devtest(void);
 
+/* Despacho interno do monitor Ring 0. */
+void shell_run_command(const char *cmd);
+
 #endif
