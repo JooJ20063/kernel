@@ -59,4 +59,10 @@ void shell_cmd_ring3gp(void);
 void shell_cmd_ring3as(void);
 #endif
 
+
+/* K0.6a: comandos internos de TTY e stdio. */
+void shell_cmd_ttytest(void);
+void shell_cmd_stdiotest(void);
+void shell_cmd_ttyfocus(const char *arg);
+
 #endif
