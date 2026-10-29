@@ -49,4 +49,14 @@ void shell_cmd_schedtest(void);
 void shell_cmd_lastexit(void);
 void shell_cmd_waittest(void);
 
+
+/* Testes especificos da arquitetura x86 (Ring 3). */
+#ifndef __x86_64__
+void shell_cmd_ring3test(void);
+void shell_cmd_ring3fault(void);
+void shell_cmd_ring3ud(void);
+void shell_cmd_ring3gp(void);
+void shell_cmd_ring3as(void);
+#endif
+
 #endif
