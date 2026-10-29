@@ -338,14 +338,7 @@ static void shell_cmd_devtest(void) {
 /* Comando: ttyfocus — Define ou exibe o dono do foco de entrada de teclado (Kernel Shell vs TTY1) */
 
 
-#ifndef __x86_64__
-/* Tarefa temporária usada no teste de desbloqueio por entrada na TTY */
-static void ttyblock_waker_task(void) {
-    task_sleep_ticks(100U);
-    tty1_receive_char('Z');
-    task_exit();
-}
-#endif
+
 
 /* Análise e despacho principal de comandos do Shell em Ring 0 */
 static void shell_run_command(const char *cmd) {
@@ -536,91 +529,11 @@ static void shell_run_command(const char *cmd) {
     } else if (shell_str_eq(cmd, "ring3test")) {
         shell_cmd_ring3test();
     } else if (shell_str_eq(cmd, "ttyblocktest")) {
-        int reader_pid;
-        int waker_pid;
-
-        tty1_set_mode(TTY_MODE_RAW);
-        tty1_set_echo(0);
-        tty1_flush_input();
-
-        reader_pid = sched_create_user_task(
-            "tty-block-reader",
-            user_tty_block_test_entry,
-            (uintptr_t)&user_stack_top
-        );
-
-        if (reader_pid < 0) {
-            klog_warn("failed to create tty block reader");
-            return;
-        }
-
-        waker_pid = sched_create_kernel_task(
-            "tty-block-waker",
-            ttyblock_waker_task
-        );
-
-        if (waker_pid < 0) {
-            tty1_receive_char('!');
-            klog_warn("failed to create tty block waker");
-            return;
-        }
-
-        vga_puts("ttyblocktest: reader pid=");
-        vga_putdec((uint32_t)reader_pid);
-        vga_puts(" waker pid=");
-        vga_putdec((uint32_t)waker_pid);
-        vga_puts(" foreground=");
-        vga_putdec((uint32_t)reader_pid);
-        vga_puts("\n");
-
-        tty1_set_foreground_pid((uint32_t)reader_pid);
+        shell_cmd_ttyblocktest();
     } else if (shell_str_eq(cmd, "ttyfgtest")) {
-        int reader_pid;
-
-        tty1_set_mode(TTY_MODE_RAW);
-        tty1_set_echo(0);
-        tty1_flush_input();
-
-        reader_pid = sched_create_user_task(
-            "tty-foreground-reader",
-            user_tty_foreground_test_entry,
-            (uintptr_t)&user_stack_top
-        );
-
-        if (reader_pid < 0) {
-            klog_warn("failed to create tty foreground reader");
-            return;
-        }
-
-        vga_puts("ttyfgtest: foreground pid=");
-        vga_putdec((uint32_t)reader_pid);
-        vga_puts(" - type any key (F12 aborts foreground ownership)\n");
-
-        tty1_set_foreground_pid((uint32_t)reader_pid);
+        shell_cmd_ttyfgtest();
     } else if (shell_str_eq(cmd, "ttycantest")) {
-        int reader_pid;
-
-        tty1_set_mode(TTY_MODE_CANONICAL);
-        tty1_set_echo(1);
-        tty1_flush_input();
-
-        reader_pid = sched_create_user_task(
-            "tty-canonical-reader",
-            user_tty_canonical_test_entry,
-            (uintptr_t)&user_stack_top
-        );
-
-        if (reader_pid < 0) {
-            tty1_set_mode(TTY_MODE_RAW);
-            tty1_set_echo(0);
-            klog_warn("failed to create tty canonical reader");
-            return;
-        }
-
-        vga_puts("ttycantest: type helxo, Backspace twice, then lo and Enter\n");
-        vga_puts("ttycantest: expected final line is hello\\n\n");
-
-        tty1_set_foreground_pid((uint32_t)reader_pid);
+        shell_cmd_ttycantest();
     } else if (shell_str_eq(cmd, "ring3fault")) {
         shell_cmd_ring3fault();
     } else if (shell_str_eq(cmd, "ring3ud")) {

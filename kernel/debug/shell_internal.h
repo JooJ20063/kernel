@@ -65,4 +65,11 @@ void shell_cmd_ttytest(void);
 void shell_cmd_stdiotest(void);
 void shell_cmd_ttyfocus(const char *arg);
 
+
+#ifndef __x86_64__
+void shell_cmd_ttyblocktest(void);
+void shell_cmd_ttyfgtest(void);
+void shell_cmd_ttycantest(void);
+#endif
+
 #endif
