@@ -27,7 +27,54 @@
 
 #include "shell_internal.h"
 
+/* K0.8b.2: exact-match command registry */
+typedef void (*shell_exact_handler_t)(void);
+typedef struct {
+    const char *name;
+    shell_exact_handler_t handler;
+} shell_exact_command_t;
+
+static const shell_exact_command_t shell_exact_commands[] = {
+    { "task", shell_cmd_task },
+    { "ps", shell_cmd_ps },
+    { "schedtest", shell_cmd_schedtest },
+    { "lastexit", shell_cmd_lastexit },
+    { "waittest", shell_cmd_waittest },
+    { "tmptest", shell_cmd_tmptest },
+    { "mounttest", shell_cmd_mounttest },
+    { "devtest", shell_cmd_devtest },
+    { "ttytest", shell_cmd_ttytest },
+    { "stdiotest", shell_cmd_stdiotest },
+    { "kslots", shell_cmd_kslots },
+#ifndef __x86_64__
+    { "ring3test", shell_cmd_ring3test },
+    { "ring3fault", shell_cmd_ring3fault },
+    { "ring3ud", shell_cmd_ring3ud },
+    { "ring3gp", shell_cmd_ring3gp },
+    { "ring3as", shell_cmd_ring3as },
+    { "ttyblocktest", shell_cmd_ttyblocktest },
+    { "ttyfgtest", shell_cmd_ttyfgtest },
+    { "ttycantest", shell_cmd_ttycantest },
+#endif
+};
+
+static int shell_dispatch_exact(const char *cmd) {
+    unsigned int i;
+    for (i = 0U; i < (unsigned int)(sizeof(shell_exact_commands) / sizeof(shell_exact_commands[0])); ++i) {
+        if (shell_str_eq(cmd, shell_exact_commands[i].name)) {
+            shell_exact_commands[i].handler();
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void shell_run_command(const char *cmd) {
+    /* Comandos exatos migrados; os demais seguem no despacho legado. */
+    if (shell_dispatch_exact(cmd)) {
+        return;
+    }
+
     if (shell_str_eq(cmd, "help")) {
         vga_puts("cmds: help clear ticks task ps pmm vmm tmptest mounttest devtest ttytest stdiotest ttyblocktest ttyfgtest ttycantest ttyfocus wp nullguard pfault kmalloc kfree krealloc kslots kheap kheapcheck ls mkdir cat touch echo elftest elfloadtest elfrun panic shutdown arch virt mapped unmap schedtest tss syscalltest ring3test ring3fault ring3ud ring3gp ring3as lastexit waittest\n");
         vga_puts("write: echo <texto> > <arquivo> | cat > <arquivo> <texto>\n");
