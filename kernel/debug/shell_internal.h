@@ -77,4 +77,8 @@ void shell_cmd_ttycantest(void);
 void shell_cmd_pfault(const char *arg);
 void shell_cmd_panic(const char *arg);
 
+/* Testes VFS e DevFS do monitor Ring 0. */
+void shell_cmd_mounttest(void);
+void shell_cmd_devtest(void);
+
 #endif
