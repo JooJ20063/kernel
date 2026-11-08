@@ -495,7 +495,7 @@ registers_t *syscall_handler(registers_t *regs) {
 
         case SYS_EXECVE: {
             const char *user_path =
-                (const char *)(uintptr_t)regs->ebx;
+            (const char *)(uintptr_t)regs->ebx;
             uintptr_t user_argv = (uintptr_t)regs->ecx;
             uintptr_t user_envp = (uintptr_t)regs->edx;
             char path[128];
